@@ -24,6 +24,8 @@ import com.sun.jna.Structure
 import com.sun.jna.ptr.ByReference
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 // This is a helper for safely working with byte buffers returned from the Rust code.
 // A rust-owned buffer is represented by its capacity, its current length, and a
@@ -40,7 +42,7 @@ open class RustBuffer : Structure() {
 
     companion object {
         internal fun alloc(size: Int = 0) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_ec7_rustbuffer_alloc(size, status).also {
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_26b3_rustbuffer_alloc(size, status).also {
                 if(it.data == null) {
                    throw RuntimeException("RustBuffer.alloc() returned null data pointer (size=${size})")
                }
@@ -48,7 +50,7 @@ open class RustBuffer : Structure() {
         }
 
         internal fun free(buf: RustBuffer.ByValue) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_ec7_rustbuffer_free(buf, status)
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_26b3_rustbuffer_free(buf, status)
         }
     }
 
@@ -257,27 +259,51 @@ internal interface _UniFFILib : Library {
         }
     }
 
-    fun lipabusinesslib_ec7_init_native_logger_once(`minLevel`: RustBuffer.ByValue,
+    fun ffi_lipabusinesslib_26b3_Wallet_object_free(`ptr`: Pointer,
     _uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun lipabusinesslib_ec7_generate_wallet(
+    fun lipabusinesslib_26b3_Wallet_new(`config`: RustBuffer.ByValue,
+    _uniffi_out_err: RustCallStatus
+    ): Pointer
+
+    fun lipabusinesslib_26b3_Wallet_get_balance(`ptr`: Pointer,`watchDescriptor`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun ffi_lipabusinesslib_ec7_rustbuffer_alloc(`size`: Int,
-    _uniffi_out_err: RustCallStatus
-    ): RustBuffer.ByValue
-
-    fun ffi_lipabusinesslib_ec7_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,
-    _uniffi_out_err: RustCallStatus
-    ): RustBuffer.ByValue
-
-    fun ffi_lipabusinesslib_ec7_rustbuffer_free(`buf`: RustBuffer.ByValue,
+    fun lipabusinesslib_26b3_init_native_logger_once(`minLevel`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun ffi_lipabusinesslib_ec7_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Int,
+    fun lipabusinesslib_26b3_generate_mnemonic(
+    _uniffi_out_err: RustCallStatus
+    ): RustBuffer.ByValue
+
+    fun lipabusinesslib_26b3_derive_keys(`network`: RustBuffer.ByValue,`mnemonicString`: RustBuffer.ByValue,
+    _uniffi_out_err: RustCallStatus
+    ): RustBuffer.ByValue
+
+    fun lipabusinesslib_26b3_sign_message(`message`: RustBuffer.ByValue,`secretKey`: RustBuffer.ByValue,
+    _uniffi_out_err: RustCallStatus
+    ): RustBuffer.ByValue
+
+    fun lipabusinesslib_26b3_generate_keypair(
+    _uniffi_out_err: RustCallStatus
+    ): RustBuffer.ByValue
+
+    fun ffi_lipabusinesslib_26b3_rustbuffer_alloc(`size`: Int,
+    _uniffi_out_err: RustCallStatus
+    ): RustBuffer.ByValue
+
+    fun ffi_lipabusinesslib_26b3_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,
+    _uniffi_out_err: RustCallStatus
+    ): RustBuffer.ByValue
+
+    fun ffi_lipabusinesslib_26b3_rustbuffer_free(`buf`: RustBuffer.ByValue,
+    _uniffi_out_err: RustCallStatus
+    ): Unit
+
+    fun ffi_lipabusinesslib_26b3_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Int,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
@@ -304,6 +330,26 @@ public object FfiConverterUByte: FfiConverter<UByte, Byte> {
 
     override fun write(value: UByte, buf: ByteBuffer) {
         buf.put(value.toByte())
+    }
+}
+
+public object FfiConverterULong: FfiConverter<ULong, Long> {
+    override fun lift(value: Long): ULong {
+        return value.toULong()
+    }
+
+    override fun read(buf: ByteBuffer): ULong {
+        return lift(buf.getLong())
+    }
+
+    override fun lower(value: ULong): Long {
+        return value.toLong()
+    }
+
+    override fun allocationSize(value: ULong) = 8
+
+    override fun write(value: ULong, buf: ByteBuffer) {
+        buf.putLong(value.toLong())
     }
 }
 
@@ -354,27 +400,384 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 }
 
 
+// Interface implemented by anything that can contain an object reference.
+//
+// Such types expose a `destroy()` method that must be called to cleanly
+// dispose of the contained objects. Failure to call this method may result
+// in memory leaks.
+//
+// The easiest way to ensure this method is called is to use the `.use`
+// helper method to execute a block and destroy the object at the end.
+interface Disposable {
+    fun destroy()
+    companion object {
+        fun destroy(vararg args: Any?) {
+            args.filterIsInstance<Disposable>()
+                .forEach(Disposable::destroy)
+        }
+    }
+}
+
+inline fun <T : Disposable?, R> T.use(block: (T) -> R) =
+    try {
+        block(this)
+    } finally {
+        try {
+            // N.B. our implementation is on the nullable type `Disposable?`.
+            this?.destroy()
+        } catch (e: Throwable) {
+            // swallow
+        }
+    }
+
+// The base class for all UniFFI Object types.
+//
+// This class provides core operations for working with the Rust `Arc<T>` pointer to
+// the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// the Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each `FFIObject` instance holds an opaque pointer to the underlying Rust struct.
+//     Method calls need to read this pointer from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an `FFIObject` is no longer needed, its pointer should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an `FFIObject` instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so will
+//     leak the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+// If we try to implement this with mutual exclusion on access to the pointer, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the pointer, but is interrupted
+//      before it can pass the pointer over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read pointer value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each `FFIObject` an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// In the future we may be able to replace some of this with automatic finalization logic, such as using
+// the new "Cleaner" functionaility in Java 9. The above scheme has been designed to work even if `destroy` is
+// invoked by garbage-collection machinery rather than by calling code (which by the way, it's apparently also
+// possible for the JVM to finalize an object while there is an in-flight call to one of its methods [1],
+// so there would still be some complexity here).
+//
+// Sigh...all of this for want of a robust finalization mechanism.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+abstract class FFIObject(
+    protected val pointer: Pointer
+): Disposable, AutoCloseable {
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    open protected fun freeRustArcPtr() {
+        // To be overridden in subclasses.
+    }
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                this.freeRustArcPtr()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithPointer(block: (ptr: Pointer) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the pointer being freed concurrently.
+        try {
+            return block(this.pointer)
+        } finally {
+            // This decrement aways matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                this.freeRustArcPtr()
+            }
+        }
+    }
+}
+
+public interface WalletInterface {
+    
+    @Throws(WalletException::class)
+    fun `getBalance`(`watchDescriptor`: String): Balance
+    
+}
+
+class Wallet(
+    pointer: Pointer
+) : FFIObject(pointer), WalletInterface {
+    constructor(`config`: Config) :
+        this(
+    rustCallWithError(WalletException) { _status ->
+    _UniFFILib.INSTANCE.lipabusinesslib_26b3_Wallet_new(FfiConverterTypeConfig.lower(`config`), _status)
+})
+
+    /**
+     * Disconnect the object from the underlying Rust object.
+     *
+     * It can be called more than once, but once called, interacting with the object
+     * causes an `IllegalStateException`.
+     *
+     * Clients **must** call this method once done with the object, or cause a memory leak.
+     */
+    override protected fun freeRustArcPtr() {
+        rustCall() { status ->
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_26b3_Wallet_object_free(this.pointer, status)
+        }
+    }
+
+    
+    @Throws(WalletException::class)override fun `getBalance`(`watchDescriptor`: String): Balance =
+        callWithPointer {
+    rustCallWithError(WalletException) { _status ->
+    _UniFFILib.INSTANCE.lipabusinesslib_26b3_Wallet_get_balance(it, FfiConverterString.lower(`watchDescriptor`),  _status)
+}
+        }.let {
+            FfiConverterTypeBalance.lift(it)
+        }
+    
+
+    
+}
+
+public object FfiConverterTypeWallet: FfiConverter<Wallet, Pointer> {
+    override fun lower(value: Wallet): Pointer = value.callWithPointer { it }
+
+    override fun lift(value: Pointer): Wallet {
+        return Wallet(value)
+    }
+
+    override fun read(buf: ByteBuffer): Wallet {
+        // The Rust code always writes pointers as 8 bytes, and will
+        // fail to compile if they don't fit.
+        return lift(Pointer(buf.getLong()))
+    }
+
+    override fun allocationSize(value: Wallet) = 8
+
+    override fun write(value: Wallet, buf: ByteBuffer) {
+        // The Rust code always expects pointers written as 8 bytes,
+        // and will fail to compile if they don't fit.
+        buf.putLong(Pointer.nativeValue(lower(value)))
+    }
+}
 
 
-data class Wallet (
-    var `privateKey`: List<UByte>
+
+
+data class Balance (
+    var `confirmed`: ULong, 
+    var `trustedPending`: ULong, 
+    var `untrustedPending`: ULong, 
+    var `immature`: ULong
 ) {
     
 }
 
-public object FfiConverterTypeWallet: FfiConverterRustBuffer<Wallet> {
-    override fun read(buf: ByteBuffer): Wallet {
-        return Wallet(
+public object FfiConverterTypeBalance: FfiConverterRustBuffer<Balance> {
+    override fun read(buf: ByteBuffer): Balance {
+        return Balance(
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: Balance) = (
+            FfiConverterULong.allocationSize(value.`confirmed`) +
+            FfiConverterULong.allocationSize(value.`trustedPending`) +
+            FfiConverterULong.allocationSize(value.`untrustedPending`) +
+            FfiConverterULong.allocationSize(value.`immature`)
+    )
+
+    override fun write(value: Balance, buf: ByteBuffer) {
+            FfiConverterULong.write(value.`confirmed`, buf)
+            FfiConverterULong.write(value.`trustedPending`, buf)
+            FfiConverterULong.write(value.`untrustedPending`, buf)
+            FfiConverterULong.write(value.`immature`, buf)
+    }
+}
+
+
+
+
+data class Config (
+    var `electrumUrl`: String, 
+    var `network`: Network
+) {
+    
+}
+
+public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
+    override fun read(buf: ByteBuffer): Config {
+        return Config(
+            FfiConverterString.read(buf),
+            FfiConverterTypeNetwork.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: Config) = (
+            FfiConverterString.allocationSize(value.`electrumUrl`) +
+            FfiConverterTypeNetwork.allocationSize(value.`network`)
+    )
+
+    override fun write(value: Config, buf: ByteBuffer) {
+            FfiConverterString.write(value.`electrumUrl`, buf)
+            FfiConverterTypeNetwork.write(value.`network`, buf)
+    }
+}
+
+
+
+
+data class Descriptors (
+    var `spendDescriptor`: String, 
+    var `watchDescriptor`: String
+) {
+    
+}
+
+public object FfiConverterTypeDescriptors: FfiConverterRustBuffer<Descriptors> {
+    override fun read(buf: ByteBuffer): Descriptors {
+        return Descriptors(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: Descriptors) = (
+            FfiConverterString.allocationSize(value.`spendDescriptor`) +
+            FfiConverterString.allocationSize(value.`watchDescriptor`)
+    )
+
+    override fun write(value: Descriptors, buf: ByteBuffer) {
+            FfiConverterString.write(value.`spendDescriptor`, buf)
+            FfiConverterString.write(value.`watchDescriptor`, buf)
+    }
+}
+
+
+
+
+data class KeyPair (
+    var `secretKey`: List<UByte>, 
+    var `publicKey`: List<UByte>
+) {
+    
+}
+
+public object FfiConverterTypeKeyPair: FfiConverterRustBuffer<KeyPair> {
+    override fun read(buf: ByteBuffer): KeyPair {
+        return KeyPair(
+            FfiConverterSequenceUByte.read(buf),
             FfiConverterSequenceUByte.read(buf),
         )
     }
 
-    override fun allocationSize(value: Wallet) = (
-            FfiConverterSequenceUByte.allocationSize(value.`privateKey`)
+    override fun allocationSize(value: KeyPair) = (
+            FfiConverterSequenceUByte.allocationSize(value.`secretKey`) +
+            FfiConverterSequenceUByte.allocationSize(value.`publicKey`)
     )
 
-    override fun write(value: Wallet, buf: ByteBuffer) {
-            FfiConverterSequenceUByte.write(value.`privateKey`, buf)
+    override fun write(value: KeyPair, buf: ByteBuffer) {
+            FfiConverterSequenceUByte.write(value.`secretKey`, buf)
+            FfiConverterSequenceUByte.write(value.`publicKey`, buf)
+    }
+}
+
+
+
+
+data class LipaKeys (
+    var `authKeypair`: KeyPair, 
+    var `walletDescriptors`: Descriptors
+) {
+    
+}
+
+public object FfiConverterTypeLipaKeys: FfiConverterRustBuffer<LipaKeys> {
+    override fun read(buf: ByteBuffer): LipaKeys {
+        return LipaKeys(
+            FfiConverterTypeKeyPair.read(buf),
+            FfiConverterTypeDescriptors.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: LipaKeys) = (
+            FfiConverterTypeKeyPair.allocationSize(value.`authKeypair`) +
+            FfiConverterTypeDescriptors.allocationSize(value.`walletDescriptors`)
+    )
+
+    override fun write(value: LipaKeys, buf: ByteBuffer) {
+            FfiConverterTypeKeyPair.write(value.`authKeypair`, buf)
+            FfiConverterTypeDescriptors.write(value.`walletDescriptors`, buf)
     }
 }
 
@@ -404,35 +807,195 @@ public object FfiConverterTypeLogLevel: FfiConverterRustBuffer<LogLevel> {
 
 
 
+enum class Network {
+    BITCOIN,TESTNET,SIGNET,REGTEST;
+}
 
-sealed class WalletGenerationException(message: String): Exception(message) {
-        // Each variant is a nested class
-        // Flat enums carries a string error message, so no special implementation is necessary.
-        class Other(message: String) : WalletGenerationException(message)
-        
+public object FfiConverterTypeNetwork: FfiConverterRustBuffer<Network> {
+    override fun read(buf: ByteBuffer) = try {
+        Network.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
 
-    companion object ErrorHandler : CallStatusErrorHandler<WalletGenerationException> {
-        override fun lift(error_buf: RustBuffer.ByValue): WalletGenerationException = FfiConverterTypeWalletGenerationError.lift(error_buf)
+    override fun allocationSize(value: Network) = 4
+
+    override fun write(value: Network, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
     }
 }
 
-public object FfiConverterTypeWalletGenerationError : FfiConverterRustBuffer<WalletGenerationException> {
-    override fun read(buf: ByteBuffer): WalletGenerationException {
+
+
+
+
+
+
+sealed class KeyDerivationException(message: String): Exception(message) {
+        // Each variant is a nested class
+        // Flat enums carries a string error message, so no special implementation is necessary.
+        class MnemonicParsing(message: String) : KeyDerivationException(message)
+        class ExtendedKeyFromMnemonic(message: String) : KeyDerivationException(message)
+        class ExtendedKeyFromXPriv(message: String) : KeyDerivationException(message)
+        class XPrivFromExtendedKey(message: String) : KeyDerivationException(message)
+        class DerivationPathParse(message: String) : KeyDerivationException(message)
+        class Derivation(message: String) : KeyDerivationException(message)
+        class DescriptorKeyFromXPriv(message: String) : KeyDerivationException(message)
+        class DescPubKeyFromDescSecretKey(message: String) : KeyDerivationException(message)
+        class DescSecretKeyFromDescKey(message: String) : KeyDerivationException(message)
+        
+
+    companion object ErrorHandler : CallStatusErrorHandler<KeyDerivationException> {
+        override fun lift(error_buf: RustBuffer.ByValue): KeyDerivationException = FfiConverterTypeKeyDerivationError.lift(error_buf)
+    }
+}
+
+public object FfiConverterTypeKeyDerivationError : FfiConverterRustBuffer<KeyDerivationException> {
+    override fun read(buf: ByteBuffer): KeyDerivationException {
         
             return when(buf.getInt()) {
-            1 -> WalletGenerationException.Other(FfiConverterString.read(buf))
+            1 -> KeyDerivationException.MnemonicParsing(FfiConverterString.read(buf))
+            2 -> KeyDerivationException.ExtendedKeyFromMnemonic(FfiConverterString.read(buf))
+            3 -> KeyDerivationException.ExtendedKeyFromXPriv(FfiConverterString.read(buf))
+            4 -> KeyDerivationException.XPrivFromExtendedKey(FfiConverterString.read(buf))
+            5 -> KeyDerivationException.DerivationPathParse(FfiConverterString.read(buf))
+            6 -> KeyDerivationException.Derivation(FfiConverterString.read(buf))
+            7 -> KeyDerivationException.DescriptorKeyFromXPriv(FfiConverterString.read(buf))
+            8 -> KeyDerivationException.DescPubKeyFromDescSecretKey(FfiConverterString.read(buf))
+            9 -> KeyDerivationException.DescSecretKeyFromDescKey(FfiConverterString.read(buf))
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
         
     }
 
     @Suppress("UNUSED_PARAMETER")
-    override fun allocationSize(value: WalletGenerationException): Int {
+    override fun allocationSize(value: KeyDerivationException): Int {
         throw RuntimeException("Writing Errors is not supported")
     }
 
     @Suppress("UNUSED_PARAMETER")
-    override fun write(value: WalletGenerationException, buf: ByteBuffer) {
+    override fun write(value: KeyDerivationException, buf: ByteBuffer) {
+        throw RuntimeException("Writing Errors is not supported")
+    }
+
+}
+
+
+
+
+
+sealed class KeyGenerationException(message: String): Exception(message) {
+        // Each variant is a nested class
+        // Flat enums carries a string error message, so no special implementation is necessary.
+        class EntropyGeneration(message: String) : KeyGenerationException(message)
+        class MnemonicFromEntropy(message: String) : KeyGenerationException(message)
+        
+
+    companion object ErrorHandler : CallStatusErrorHandler<KeyGenerationException> {
+        override fun lift(error_buf: RustBuffer.ByValue): KeyGenerationException = FfiConverterTypeKeyGenerationError.lift(error_buf)
+    }
+}
+
+public object FfiConverterTypeKeyGenerationError : FfiConverterRustBuffer<KeyGenerationException> {
+    override fun read(buf: ByteBuffer): KeyGenerationException {
+        
+            return when(buf.getInt()) {
+            1 -> KeyGenerationException.EntropyGeneration(FfiConverterString.read(buf))
+            2 -> KeyGenerationException.MnemonicFromEntropy(FfiConverterString.read(buf))
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+        
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    override fun allocationSize(value: KeyGenerationException): Int {
+        throw RuntimeException("Writing Errors is not supported")
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    override fun write(value: KeyGenerationException, buf: ByteBuffer) {
+        throw RuntimeException("Writing Errors is not supported")
+    }
+
+}
+
+
+
+
+
+sealed class SigningException(message: String): Exception(message) {
+        // Each variant is a nested class
+        // Flat enums carries a string error message, so no special implementation is necessary.
+        class MessageHashing(message: String) : SigningException(message)
+        class SecretKeyParse(message: String) : SigningException(message)
+        
+
+    companion object ErrorHandler : CallStatusErrorHandler<SigningException> {
+        override fun lift(error_buf: RustBuffer.ByValue): SigningException = FfiConverterTypeSigningError.lift(error_buf)
+    }
+}
+
+public object FfiConverterTypeSigningError : FfiConverterRustBuffer<SigningException> {
+    override fun read(buf: ByteBuffer): SigningException {
+        
+            return when(buf.getInt()) {
+            1 -> SigningException.MessageHashing(FfiConverterString.read(buf))
+            2 -> SigningException.SecretKeyParse(FfiConverterString.read(buf))
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+        
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    override fun allocationSize(value: SigningException): Int {
+        throw RuntimeException("Writing Errors is not supported")
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    override fun write(value: SigningException, buf: ByteBuffer) {
+        throw RuntimeException("Writing Errors is not supported")
+    }
+
+}
+
+
+
+
+
+sealed class WalletException(message: String): Exception(message) {
+        // Each variant is a nested class
+        // Flat enums carries a string error message, so no special implementation is necessary.
+        class ChainBackendClient(message: String) : WalletException(message)
+        class BdkWallet(message: String) : WalletException(message)
+        class ChainSync(message: String) : WalletException(message)
+        class GetBalance(message: String) : WalletException(message)
+        
+
+    companion object ErrorHandler : CallStatusErrorHandler<WalletException> {
+        override fun lift(error_buf: RustBuffer.ByValue): WalletException = FfiConverterTypeWalletError.lift(error_buf)
+    }
+}
+
+public object FfiConverterTypeWalletError : FfiConverterRustBuffer<WalletException> {
+    override fun read(buf: ByteBuffer): WalletException {
+        
+            return when(buf.getInt()) {
+            1 -> WalletException.ChainBackendClient(FfiConverterString.read(buf))
+            2 -> WalletException.BdkWallet(FfiConverterString.read(buf))
+            3 -> WalletException.ChainSync(FfiConverterString.read(buf))
+            4 -> WalletException.GetBalance(FfiConverterString.read(buf))
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+        
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    override fun allocationSize(value: WalletException): Int {
+        throw RuntimeException("Writing Errors is not supported")
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    override fun write(value: WalletException, buf: ByteBuffer) {
         throw RuntimeException("Writing Errors is not supported")
     }
 
@@ -463,18 +1026,73 @@ public object FfiConverterSequenceUByte: FfiConverterRustBuffer<List<UByte>> {
     }
 }
 
+
+
+
+public object FfiConverterSequenceString: FfiConverterRustBuffer<List<String>> {
+    override fun read(buf: ByteBuffer): List<String> {
+        val len = buf.getInt()
+        return List<String>(len) {
+            FfiConverterString.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<String>): Int {
+        val sizeForLength = 4
+        val sizeForItems = value.map { FfiConverterString.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<String>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.forEach {
+            FfiConverterString.write(it, buf)
+        }
+    }
+}
+
 fun `initNativeLoggerOnce`(`minLevel`: LogLevel) =
     
     rustCall() { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ec7_init_native_logger_once(FfiConverterTypeLogLevel.lower(`minLevel`), _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_26b3_init_native_logger_once(FfiConverterTypeLogLevel.lower(`minLevel`), _status)
 }
 
-@Throws(WalletGenerationException::class)
+@Throws(KeyGenerationException::class)
 
-fun `generateWallet`(): Wallet {
-    return FfiConverterTypeWallet.lift(
-    rustCallWithError(WalletGenerationException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ec7_generate_wallet( _status)
+fun `generateMnemonic`(): List<String> {
+    return FfiConverterSequenceString.lift(
+    rustCallWithError(KeyGenerationException) { _status ->
+    _UniFFILib.INSTANCE.lipabusinesslib_26b3_generate_mnemonic( _status)
+})
+}
+
+
+@Throws(KeyDerivationException::class)
+
+fun `deriveKeys`(`network`: Network, `mnemonicString`: List<String>): LipaKeys {
+    return FfiConverterTypeLipaKeys.lift(
+    rustCallWithError(KeyDerivationException) { _status ->
+    _UniFFILib.INSTANCE.lipabusinesslib_26b3_derive_keys(FfiConverterTypeNetwork.lower(`network`), FfiConverterSequenceString.lower(`mnemonicString`), _status)
+})
+}
+
+
+@Throws(SigningException::class)
+
+fun `signMessage`(`message`: String, `secretKey`: List<UByte>): String {
+    return FfiConverterString.lift(
+    rustCallWithError(SigningException) { _status ->
+    _UniFFILib.INSTANCE.lipabusinesslib_26b3_sign_message(FfiConverterString.lower(`message`), FfiConverterSequenceUByte.lower(`secretKey`), _status)
+})
+}
+
+
+@Throws(KeyGenerationException::class)
+
+fun `generateKeypair`(): KeyPair {
+    return FfiConverterTypeKeyPair.lift(
+    rustCallWithError(KeyGenerationException) { _status ->
+    _UniFFILib.INSTANCE.lipabusinesslib_26b3_generate_keypair( _status)
 })
 }
 
