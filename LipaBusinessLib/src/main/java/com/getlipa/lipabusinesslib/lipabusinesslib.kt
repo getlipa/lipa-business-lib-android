@@ -42,7 +42,7 @@ open class RustBuffer : Structure() {
 
     companion object {
         internal fun alloc(size: Int = 0) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_26b3_rustbuffer_alloc(size, status).also {
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_ccf8_rustbuffer_alloc(size, status).also {
                 if(it.data == null) {
                    throw RuntimeException("RustBuffer.alloc() returned null data pointer (size=${size})")
                }
@@ -50,7 +50,7 @@ open class RustBuffer : Structure() {
         }
 
         internal fun free(buf: RustBuffer.ByValue) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_26b3_rustbuffer_free(buf, status)
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_ccf8_rustbuffer_free(buf, status)
         }
     }
 
@@ -259,51 +259,51 @@ internal interface _UniFFILib : Library {
         }
     }
 
-    fun ffi_lipabusinesslib_26b3_Wallet_object_free(`ptr`: Pointer,
+    fun ffi_lipabusinesslib_ccf8_Wallet_object_free(`ptr`: Pointer,
     _uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun lipabusinesslib_26b3_Wallet_new(`config`: RustBuffer.ByValue,
+    fun lipabusinesslib_ccf8_Wallet_new(`config`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): Pointer
 
-    fun lipabusinesslib_26b3_Wallet_get_balance(`ptr`: Pointer,`watchDescriptor`: RustBuffer.ByValue,
+    fun lipabusinesslib_ccf8_Wallet_get_balance(`ptr`: Pointer,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_26b3_init_native_logger_once(`minLevel`: RustBuffer.ByValue,
+    fun lipabusinesslib_ccf8_init_native_logger_once(`minLevel`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun lipabusinesslib_26b3_generate_mnemonic(
+    fun lipabusinesslib_ccf8_generate_mnemonic(
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_26b3_derive_keys(`network`: RustBuffer.ByValue,`mnemonicString`: RustBuffer.ByValue,
+    fun lipabusinesslib_ccf8_derive_keys(`network`: RustBuffer.ByValue,`mnemonicString`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_26b3_sign_message(`message`: RustBuffer.ByValue,`secretKey`: RustBuffer.ByValue,
+    fun lipabusinesslib_ccf8_generate_keypair(
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_26b3_generate_keypair(
+    fun lipabusinesslib_ccf8_sign_message(`message`: RustBuffer.ByValue,`secretKey`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun ffi_lipabusinesslib_26b3_rustbuffer_alloc(`size`: Int,
+    fun ffi_lipabusinesslib_ccf8_rustbuffer_alloc(`size`: Int,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun ffi_lipabusinesslib_26b3_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,
+    fun ffi_lipabusinesslib_ccf8_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun ffi_lipabusinesslib_26b3_rustbuffer_free(`buf`: RustBuffer.ByValue,
+    fun ffi_lipabusinesslib_ccf8_rustbuffer_free(`buf`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun ffi_lipabusinesslib_26b3_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Int,
+    fun ffi_lipabusinesslib_ccf8_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Int,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
@@ -312,26 +312,6 @@ internal interface _UniFFILib : Library {
 
 // Public interface members begin here.
 
-
-public object FfiConverterUByte: FfiConverter<UByte, Byte> {
-    override fun lift(value: Byte): UByte {
-        return value.toUByte()
-    }
-
-    override fun read(buf: ByteBuffer): UByte {
-        return lift(buf.get())
-    }
-
-    override fun lower(value: UByte): Byte {
-        return value.toByte()
-    }
-
-    override fun allocationSize(value: UByte) = 1
-
-    override fun write(value: UByte, buf: ByteBuffer) {
-        buf.put(value.toByte())
-    }
-}
 
 public object FfiConverterULong: FfiConverter<ULong, Long> {
     override fun lift(value: Long): ULong {
@@ -565,7 +545,7 @@ abstract class FFIObject(
 public interface WalletInterface {
     
     @Throws(WalletException::class)
-    fun `getBalance`(`watchDescriptor`: String): Balance
+    fun `getBalance`(): Balance
     
 }
 
@@ -575,7 +555,7 @@ class Wallet(
     constructor(`config`: Config) :
         this(
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_26b3_Wallet_new(FfiConverterTypeConfig.lower(`config`), _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_ccf8_Wallet_new(FfiConverterTypeConfig.lower(`config`), _status)
 })
 
     /**
@@ -588,15 +568,15 @@ class Wallet(
      */
     override protected fun freeRustArcPtr() {
         rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_26b3_Wallet_object_free(this.pointer, status)
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_ccf8_Wallet_object_free(this.pointer, status)
         }
     }
 
     
-    @Throws(WalletException::class)override fun `getBalance`(`watchDescriptor`: String): Balance =
+    @Throws(WalletException::class)override fun `getBalance`(): Balance =
         callWithPointer {
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_26b3_Wallet_get_balance(it, FfiConverterString.lower(`watchDescriptor`),  _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_ccf8_Wallet_get_balance(it,  _status)
 }
         }.let {
             FfiConverterTypeBalance.lift(it)
@@ -670,7 +650,8 @@ public object FfiConverterTypeBalance: FfiConverterRustBuffer<Balance> {
 
 data class Config (
     var `electrumUrl`: String, 
-    var `network`: Network
+    var `network`: Network, 
+    var `watchDescriptor`: String
 ) {
     
 }
@@ -680,17 +661,20 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
         return Config(
             FfiConverterString.read(buf),
             FfiConverterTypeNetwork.read(buf),
+            FfiConverterString.read(buf),
         )
     }
 
     override fun allocationSize(value: Config) = (
             FfiConverterString.allocationSize(value.`electrumUrl`) +
-            FfiConverterTypeNetwork.allocationSize(value.`network`)
+            FfiConverterTypeNetwork.allocationSize(value.`network`) +
+            FfiConverterString.allocationSize(value.`watchDescriptor`)
     )
 
     override fun write(value: Config, buf: ByteBuffer) {
             FfiConverterString.write(value.`electrumUrl`, buf)
             FfiConverterTypeNetwork.write(value.`network`, buf)
+            FfiConverterString.write(value.`watchDescriptor`, buf)
     }
 }
 
@@ -727,8 +711,8 @@ public object FfiConverterTypeDescriptors: FfiConverterRustBuffer<Descriptors> {
 
 
 data class KeyPair (
-    var `secretKey`: List<UByte>, 
-    var `publicKey`: List<UByte>
+    var `secretKey`: String, 
+    var `publicKey`: String
 ) {
     
 }
@@ -736,19 +720,19 @@ data class KeyPair (
 public object FfiConverterTypeKeyPair: FfiConverterRustBuffer<KeyPair> {
     override fun read(buf: ByteBuffer): KeyPair {
         return KeyPair(
-            FfiConverterSequenceUByte.read(buf),
-            FfiConverterSequenceUByte.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
         )
     }
 
     override fun allocationSize(value: KeyPair) = (
-            FfiConverterSequenceUByte.allocationSize(value.`secretKey`) +
-            FfiConverterSequenceUByte.allocationSize(value.`publicKey`)
+            FfiConverterString.allocationSize(value.`secretKey`) +
+            FfiConverterString.allocationSize(value.`publicKey`)
     )
 
     override fun write(value: KeyPair, buf: ByteBuffer) {
-            FfiConverterSequenceUByte.write(value.`secretKey`, buf)
-            FfiConverterSequenceUByte.write(value.`publicKey`, buf)
+            FfiConverterString.write(value.`secretKey`, buf)
+            FfiConverterString.write(value.`publicKey`, buf)
     }
 }
 
@@ -1004,31 +988,6 @@ public object FfiConverterTypeWalletError : FfiConverterRustBuffer<WalletExcepti
 
 
 
-public object FfiConverterSequenceUByte: FfiConverterRustBuffer<List<UByte>> {
-    override fun read(buf: ByteBuffer): List<UByte> {
-        val len = buf.getInt()
-        return List<UByte>(len) {
-            FfiConverterUByte.read(buf)
-        }
-    }
-
-    override fun allocationSize(value: List<UByte>): Int {
-        val sizeForLength = 4
-        val sizeForItems = value.map { FfiConverterUByte.allocationSize(it) }.sum()
-        return sizeForLength + sizeForItems
-    }
-
-    override fun write(value: List<UByte>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        value.forEach {
-            FfiConverterUByte.write(it, buf)
-        }
-    }
-}
-
-
-
-
 public object FfiConverterSequenceString: FfiConverterRustBuffer<List<String>> {
     override fun read(buf: ByteBuffer): List<String> {
         val len = buf.getInt()
@@ -1054,7 +1013,7 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<String>> {
 fun `initNativeLoggerOnce`(`minLevel`: LogLevel) =
     
     rustCall() { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_26b3_init_native_logger_once(FfiConverterTypeLogLevel.lower(`minLevel`), _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_ccf8_init_native_logger_once(FfiConverterTypeLogLevel.lower(`minLevel`), _status)
 }
 
 @Throws(KeyGenerationException::class)
@@ -1062,7 +1021,7 @@ fun `initNativeLoggerOnce`(`minLevel`: LogLevel) =
 fun `generateMnemonic`(): List<String> {
     return FfiConverterSequenceString.lift(
     rustCallWithError(KeyGenerationException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_26b3_generate_mnemonic( _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_ccf8_generate_mnemonic( _status)
 })
 }
 
@@ -1072,17 +1031,7 @@ fun `generateMnemonic`(): List<String> {
 fun `deriveKeys`(`network`: Network, `mnemonicString`: List<String>): LipaKeys {
     return FfiConverterTypeLipaKeys.lift(
     rustCallWithError(KeyDerivationException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_26b3_derive_keys(FfiConverterTypeNetwork.lower(`network`), FfiConverterSequenceString.lower(`mnemonicString`), _status)
-})
-}
-
-
-@Throws(SigningException::class)
-
-fun `signMessage`(`message`: String, `secretKey`: List<UByte>): String {
-    return FfiConverterString.lift(
-    rustCallWithError(SigningException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_26b3_sign_message(FfiConverterString.lower(`message`), FfiConverterSequenceUByte.lower(`secretKey`), _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_ccf8_derive_keys(FfiConverterTypeNetwork.lower(`network`), FfiConverterSequenceString.lower(`mnemonicString`), _status)
 })
 }
 
@@ -1092,7 +1041,17 @@ fun `signMessage`(`message`: String, `secretKey`: List<UByte>): String {
 fun `generateKeypair`(): KeyPair {
     return FfiConverterTypeKeyPair.lift(
     rustCallWithError(KeyGenerationException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_26b3_generate_keypair( _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_ccf8_generate_keypair( _status)
+})
+}
+
+
+@Throws(SigningException::class)
+
+fun `signMessage`(`message`: String, `secretKey`: String): String {
+    return FfiConverterString.lift(
+    rustCallWithError(SigningException) { _status ->
+    _UniFFILib.INSTANCE.lipabusinesslib_ccf8_sign_message(FfiConverterString.lower(`message`), FfiConverterString.lower(`secretKey`), _status)
 })
 }
 
