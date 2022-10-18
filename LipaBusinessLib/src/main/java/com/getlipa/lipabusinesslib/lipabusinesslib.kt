@@ -42,7 +42,7 @@ open class RustBuffer : Structure() {
 
     companion object {
         internal fun alloc(size: Int = 0) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_9d7a_rustbuffer_alloc(size, status).also {
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_882b_rustbuffer_alloc(size, status).also {
                 if(it.data == null) {
                    throw RuntimeException("RustBuffer.alloc() returned null data pointer (size=${size})")
                }
@@ -50,7 +50,7 @@ open class RustBuffer : Structure() {
         }
 
         internal fun free(buf: RustBuffer.ByValue) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_9d7a_rustbuffer_free(buf, status)
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_882b_rustbuffer_free(buf, status)
         }
     }
 
@@ -259,51 +259,51 @@ internal interface _UniFFILib : Library {
         }
     }
 
-    fun ffi_lipabusinesslib_9d7a_Wallet_object_free(`ptr`: Pointer,
+    fun ffi_lipabusinesslib_882b_Wallet_object_free(`ptr`: Pointer,
     _uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun lipabusinesslib_9d7a_Wallet_new(`config`: RustBuffer.ByValue,
+    fun lipabusinesslib_882b_Wallet_new(`config`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): Pointer
 
-    fun lipabusinesslib_9d7a_Wallet_get_balance(`ptr`: Pointer,
+    fun lipabusinesslib_882b_Wallet_sync_balance(`ptr`: Pointer,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_9d7a_init_native_logger_once(`minLevel`: RustBuffer.ByValue,
+    fun lipabusinesslib_882b_init_native_logger_once(`minLevel`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun lipabusinesslib_9d7a_generate_mnemonic(
+    fun lipabusinesslib_882b_generate_mnemonic(
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_9d7a_derive_keys(`network`: RustBuffer.ByValue,`mnemonicString`: RustBuffer.ByValue,
+    fun lipabusinesslib_882b_derive_keys(`network`: RustBuffer.ByValue,`mnemonicString`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_9d7a_generate_keypair(
+    fun lipabusinesslib_882b_sign_message(`message`: RustBuffer.ByValue,`secretKey`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_9d7a_sign_message(`message`: RustBuffer.ByValue,`secretKey`: RustBuffer.ByValue,
+    fun lipabusinesslib_882b_generate_keypair(
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun ffi_lipabusinesslib_9d7a_rustbuffer_alloc(`size`: Int,
+    fun ffi_lipabusinesslib_882b_rustbuffer_alloc(`size`: Int,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun ffi_lipabusinesslib_9d7a_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,
+    fun ffi_lipabusinesslib_882b_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun ffi_lipabusinesslib_9d7a_rustbuffer_free(`buf`: RustBuffer.ByValue,
+    fun ffi_lipabusinesslib_882b_rustbuffer_free(`buf`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun ffi_lipabusinesslib_9d7a_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Int,
+    fun ffi_lipabusinesslib_882b_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Int,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
@@ -545,7 +545,7 @@ abstract class FFIObject(
 public interface WalletInterface {
     
     @Throws(WalletException::class)
-    fun `getBalance`(): Balance
+    fun `syncBalance`(): Balance
     
 }
 
@@ -555,7 +555,7 @@ class Wallet(
     constructor(`config`: Config) :
         this(
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_9d7a_Wallet_new(FfiConverterTypeConfig.lower(`config`), _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_882b_Wallet_new(FfiConverterTypeConfig.lower(`config`), _status)
 })
 
     /**
@@ -568,15 +568,15 @@ class Wallet(
      */
     override protected fun freeRustArcPtr() {
         rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_9d7a_Wallet_object_free(this.pointer, status)
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_882b_Wallet_object_free(this.pointer, status)
         }
     }
 
     
-    @Throws(WalletException::class)override fun `getBalance`(): Balance =
+    @Throws(WalletException::class)override fun `syncBalance`(): Balance =
         callWithPointer {
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_9d7a_Wallet_get_balance(it,  _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_882b_Wallet_sync_balance(it,  _status)
 }
         }.let {
             FfiConverterTypeBalance.lift(it)
@@ -650,9 +650,9 @@ public object FfiConverterTypeBalance: FfiConverterRustBuffer<Balance> {
 
 data class Config (
     var `electrumUrl`: String, 
+    var `walletDbPath`: String, 
     var `network`: Network, 
-    var `watchDescriptor`: String, 
-    var `dbPath`: String
+    var `watchDescriptor`: String
 ) {
     
 }
@@ -661,24 +661,24 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
     override fun read(buf: ByteBuffer): Config {
         return Config(
             FfiConverterString.read(buf),
-            FfiConverterTypeNetwork.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterTypeNetwork.read(buf),
             FfiConverterString.read(buf),
         )
     }
 
     override fun allocationSize(value: Config) = (
             FfiConverterString.allocationSize(value.`electrumUrl`) +
+            FfiConverterString.allocationSize(value.`walletDbPath`) +
             FfiConverterTypeNetwork.allocationSize(value.`network`) +
-            FfiConverterString.allocationSize(value.`watchDescriptor`) +
-            FfiConverterString.allocationSize(value.`dbPath`)
+            FfiConverterString.allocationSize(value.`watchDescriptor`)
     )
 
     override fun write(value: Config, buf: ByteBuffer) {
             FfiConverterString.write(value.`electrumUrl`, buf)
+            FfiConverterString.write(value.`walletDbPath`, buf)
             FfiConverterTypeNetwork.write(value.`network`, buf)
             FfiConverterString.write(value.`watchDescriptor`, buf)
-            FfiConverterString.write(value.`dbPath`, buf)
     }
 }
 
@@ -822,15 +822,15 @@ public object FfiConverterTypeNetwork: FfiConverterRustBuffer<Network> {
 sealed class KeyDerivationException(message: String): Exception(message) {
         // Each variant is a nested class
         // Flat enums carries a string error message, so no special implementation is necessary.
-        class MnemonicParsing(message: String) : KeyDerivationException(message)
-        class ExtendedKeyFromMnemonic(message: String) : KeyDerivationException(message)
-        class ExtendedKeyFromXPriv(message: String) : KeyDerivationException(message)
-        class XPrivFromExtendedKey(message: String) : KeyDerivationException(message)
-        class DerivationPathParse(message: String) : KeyDerivationException(message)
         class Derivation(message: String) : KeyDerivationException(message)
-        class DescriptorKeyFromXPriv(message: String) : KeyDerivationException(message)
+        class DerivationPathParse(message: String) : KeyDerivationException(message)
+        class DescKeyFromXPriv(message: String) : KeyDerivationException(message)
         class DescPubKeyFromDescSecretKey(message: String) : KeyDerivationException(message)
         class DescSecretKeyFromDescKey(message: String) : KeyDerivationException(message)
+        class ExtendedKeyFromMnemonic(message: String) : KeyDerivationException(message)
+        class ExtendedKeyFromXPriv(message: String) : KeyDerivationException(message)
+        class MnemonicParsing(message: String) : KeyDerivationException(message)
+        class XPrivFromExtendedKey(message: String) : KeyDerivationException(message)
         
 
     companion object ErrorHandler : CallStatusErrorHandler<KeyDerivationException> {
@@ -842,28 +842,63 @@ public object FfiConverterTypeKeyDerivationError : FfiConverterRustBuffer<KeyDer
     override fun read(buf: ByteBuffer): KeyDerivationException {
         
             return when(buf.getInt()) {
-            1 -> KeyDerivationException.MnemonicParsing(FfiConverterString.read(buf))
-            2 -> KeyDerivationException.ExtendedKeyFromMnemonic(FfiConverterString.read(buf))
-            3 -> KeyDerivationException.ExtendedKeyFromXPriv(FfiConverterString.read(buf))
-            4 -> KeyDerivationException.XPrivFromExtendedKey(FfiConverterString.read(buf))
-            5 -> KeyDerivationException.DerivationPathParse(FfiConverterString.read(buf))
-            6 -> KeyDerivationException.Derivation(FfiConverterString.read(buf))
-            7 -> KeyDerivationException.DescriptorKeyFromXPriv(FfiConverterString.read(buf))
-            8 -> KeyDerivationException.DescPubKeyFromDescSecretKey(FfiConverterString.read(buf))
-            9 -> KeyDerivationException.DescSecretKeyFromDescKey(FfiConverterString.read(buf))
+            1 -> KeyDerivationException.Derivation(FfiConverterString.read(buf))
+            2 -> KeyDerivationException.DerivationPathParse(FfiConverterString.read(buf))
+            3 -> KeyDerivationException.DescKeyFromXPriv(FfiConverterString.read(buf))
+            4 -> KeyDerivationException.DescPubKeyFromDescSecretKey(FfiConverterString.read(buf))
+            5 -> KeyDerivationException.DescSecretKeyFromDescKey(FfiConverterString.read(buf))
+            6 -> KeyDerivationException.ExtendedKeyFromMnemonic(FfiConverterString.read(buf))
+            7 -> KeyDerivationException.ExtendedKeyFromXPriv(FfiConverterString.read(buf))
+            8 -> KeyDerivationException.MnemonicParsing(FfiConverterString.read(buf))
+            9 -> KeyDerivationException.XPrivFromExtendedKey(FfiConverterString.read(buf))
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
         
     }
 
-    @Suppress("UNUSED_PARAMETER")
     override fun allocationSize(value: KeyDerivationException): Int {
-        throw RuntimeException("Writing Errors is not supported")
+        return 4
     }
 
-    @Suppress("UNUSED_PARAMETER")
     override fun write(value: KeyDerivationException, buf: ByteBuffer) {
-        throw RuntimeException("Writing Errors is not supported")
+        when(value) {
+            is KeyDerivationException.Derivation -> {
+                buf.putInt(1)
+                Unit
+            }
+            is KeyDerivationException.DerivationPathParse -> {
+                buf.putInt(2)
+                Unit
+            }
+            is KeyDerivationException.DescKeyFromXPriv -> {
+                buf.putInt(3)
+                Unit
+            }
+            is KeyDerivationException.DescPubKeyFromDescSecretKey -> {
+                buf.putInt(4)
+                Unit
+            }
+            is KeyDerivationException.DescSecretKeyFromDescKey -> {
+                buf.putInt(5)
+                Unit
+            }
+            is KeyDerivationException.ExtendedKeyFromMnemonic -> {
+                buf.putInt(6)
+                Unit
+            }
+            is KeyDerivationException.ExtendedKeyFromXPriv -> {
+                buf.putInt(7)
+                Unit
+            }
+            is KeyDerivationException.MnemonicParsing -> {
+                buf.putInt(8)
+                Unit
+            }
+            is KeyDerivationException.XPrivFromExtendedKey -> {
+                buf.putInt(9)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
 }
@@ -895,14 +930,21 @@ public object FfiConverterTypeKeyGenerationError : FfiConverterRustBuffer<KeyGen
         
     }
 
-    @Suppress("UNUSED_PARAMETER")
     override fun allocationSize(value: KeyGenerationException): Int {
-        throw RuntimeException("Writing Errors is not supported")
+        return 4
     }
 
-    @Suppress("UNUSED_PARAMETER")
     override fun write(value: KeyGenerationException, buf: ByteBuffer) {
-        throw RuntimeException("Writing Errors is not supported")
+        when(value) {
+            is KeyGenerationException.EntropyGeneration -> {
+                buf.putInt(1)
+                Unit
+            }
+            is KeyGenerationException.MnemonicFromEntropy -> {
+                buf.putInt(2)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
 }
@@ -934,14 +976,21 @@ public object FfiConverterTypeSigningError : FfiConverterRustBuffer<SigningExcep
         
     }
 
-    @Suppress("UNUSED_PARAMETER")
     override fun allocationSize(value: SigningException): Int {
-        throw RuntimeException("Writing Errors is not supported")
+        return 4
     }
 
-    @Suppress("UNUSED_PARAMETER")
     override fun write(value: SigningException, buf: ByteBuffer) {
-        throw RuntimeException("Writing Errors is not supported")
+        when(value) {
+            is SigningException.MessageHashing -> {
+                buf.putInt(1)
+                Unit
+            }
+            is SigningException.SecretKeyParse -> {
+                buf.putInt(2)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
 }
@@ -953,10 +1002,12 @@ public object FfiConverterTypeSigningError : FfiConverterRustBuffer<SigningExcep
 sealed class WalletException(message: String): Exception(message) {
         // Each variant is a nested class
         // Flat enums carries a string error message, so no special implementation is necessary.
-        class ChainBackendClient(message: String) : WalletException(message)
         class BdkWallet(message: String) : WalletException(message)
+        class ChainBackendClient(message: String) : WalletException(message)
         class ChainSync(message: String) : WalletException(message)
         class GetBalance(message: String) : WalletException(message)
+        class OpenDatabase(message: String) : WalletException(message)
+        class OpenDatabaseTree(message: String) : WalletException(message)
         
 
     companion object ErrorHandler : CallStatusErrorHandler<WalletException> {
@@ -968,23 +1019,48 @@ public object FfiConverterTypeWalletError : FfiConverterRustBuffer<WalletExcepti
     override fun read(buf: ByteBuffer): WalletException {
         
             return when(buf.getInt()) {
-            1 -> WalletException.ChainBackendClient(FfiConverterString.read(buf))
-            2 -> WalletException.BdkWallet(FfiConverterString.read(buf))
+            1 -> WalletException.BdkWallet(FfiConverterString.read(buf))
+            2 -> WalletException.ChainBackendClient(FfiConverterString.read(buf))
             3 -> WalletException.ChainSync(FfiConverterString.read(buf))
             4 -> WalletException.GetBalance(FfiConverterString.read(buf))
+            5 -> WalletException.OpenDatabase(FfiConverterString.read(buf))
+            6 -> WalletException.OpenDatabaseTree(FfiConverterString.read(buf))
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
         
     }
 
-    @Suppress("UNUSED_PARAMETER")
     override fun allocationSize(value: WalletException): Int {
-        throw RuntimeException("Writing Errors is not supported")
+        return 4
     }
 
-    @Suppress("UNUSED_PARAMETER")
     override fun write(value: WalletException, buf: ByteBuffer) {
-        throw RuntimeException("Writing Errors is not supported")
+        when(value) {
+            is WalletException.BdkWallet -> {
+                buf.putInt(1)
+                Unit
+            }
+            is WalletException.ChainBackendClient -> {
+                buf.putInt(2)
+                Unit
+            }
+            is WalletException.ChainSync -> {
+                buf.putInt(3)
+                Unit
+            }
+            is WalletException.GetBalance -> {
+                buf.putInt(4)
+                Unit
+            }
+            is WalletException.OpenDatabase -> {
+                buf.putInt(5)
+                Unit
+            }
+            is WalletException.OpenDatabaseTree -> {
+                buf.putInt(6)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
 }
@@ -1017,7 +1093,7 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<String>> {
 fun `initNativeLoggerOnce`(`minLevel`: LogLevel) =
     
     rustCall() { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_9d7a_init_native_logger_once(FfiConverterTypeLogLevel.lower(`minLevel`), _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_882b_init_native_logger_once(FfiConverterTypeLogLevel.lower(`minLevel`), _status)
 }
 
 @Throws(KeyGenerationException::class)
@@ -1025,7 +1101,7 @@ fun `initNativeLoggerOnce`(`minLevel`: LogLevel) =
 fun `generateMnemonic`(): List<String> {
     return FfiConverterSequenceString.lift(
     rustCallWithError(KeyGenerationException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_9d7a_generate_mnemonic( _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_882b_generate_mnemonic( _status)
 })
 }
 
@@ -1035,17 +1111,7 @@ fun `generateMnemonic`(): List<String> {
 fun `deriveKeys`(`network`: Network, `mnemonicString`: List<String>): LipaKeys {
     return FfiConverterTypeLipaKeys.lift(
     rustCallWithError(KeyDerivationException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_9d7a_derive_keys(FfiConverterTypeNetwork.lower(`network`), FfiConverterSequenceString.lower(`mnemonicString`), _status)
-})
-}
-
-
-@Throws(KeyGenerationException::class)
-
-fun `generateKeypair`(): KeyPair {
-    return FfiConverterTypeKeyPair.lift(
-    rustCallWithError(KeyGenerationException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_9d7a_generate_keypair( _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_882b_derive_keys(FfiConverterTypeNetwork.lower(`network`), FfiConverterSequenceString.lower(`mnemonicString`), _status)
 })
 }
 
@@ -1055,7 +1121,17 @@ fun `generateKeypair`(): KeyPair {
 fun `signMessage`(`message`: String, `secretKey`: String): String {
     return FfiConverterString.lift(
     rustCallWithError(SigningException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_9d7a_sign_message(FfiConverterString.lower(`message`), FfiConverterString.lower(`secretKey`), _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_882b_sign_message(FfiConverterString.lower(`message`), FfiConverterString.lower(`secretKey`), _status)
+})
+}
+
+
+@Throws(KeyGenerationException::class)
+
+fun `generateKeypair`(): KeyPair {
+    return FfiConverterTypeKeyPair.lift(
+    rustCallWithError(KeyGenerationException) { _status ->
+    _UniFFILib.INSTANCE.lipabusinesslib_882b_generate_keypair( _status)
 })
 }
 
