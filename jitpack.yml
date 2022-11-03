@@ -1,6 +1,6 @@
 before_install:
-  - wget https://github.com/getlipa/lipa-business-lib-android/releases/download/v0.1.0-alpha.5/jniLibs.zip
-  - if [ $(shasum -a 256 jniLibs.zip | sed 's/ .*//') != 'c611e7fe5adc2eb2335853efc1aa8db49c5b55a49490e630123083338269415c' ]; then exit 1; fi
+  - wget https://github.com/getlipa/lipa-business-lib-android/releases/download/v0.1.0-alpha.6/jniLibs.zip
+  - if [ $(shasum -a 256 jniLibs.zip | sed 's/ .*//') != '0a17a2516aa915f7c56aada9ad2d1ad5ef4238fb1d4bee70d518dcc1f45c982f' ]; then exit 1; fi
   - unzip -o jniLibs.zip
   - mv jniLibs LipaBusinessLib/src/main/jniLibs
   - wget https://github.com/java-native-access/jna/archive/refs/tags/5.8.0.zip
@@ -10,5 +10,6 @@ before_install:
   - cp libjnidispatch.so LipaBusinessLib/src/main/jniLibs/arm64-v8a
   - unzip -o jna-5.8.0/dist/android-armv7.jar
   - cp libjnidispatch.so LipaBusinessLib/src/main/jniLibs/armeabi
+  - cp libjnidispatch.so LipaBusinessLib/src/main/jniLibs/armeabi-v7a
   - unzip -o jna-5.8.0/dist/android-x86.jar
   - cp libjnidispatch.so LipaBusinessLib/src/main/jniLibs/x86
