@@ -42,7 +42,7 @@ open class RustBuffer : Structure() {
 
     companion object {
         internal fun alloc(size: Int = 0) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_d2db_rustbuffer_alloc(size, status).also {
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_6fff_rustbuffer_alloc(size, status).also {
                 if(it.data == null) {
                    throw RuntimeException("RustBuffer.alloc() returned null data pointer (size=${size})")
                }
@@ -50,7 +50,7 @@ open class RustBuffer : Structure() {
         }
 
         internal fun free(buf: RustBuffer.ByValue) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_d2db_rustbuffer_free(buf, status)
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_6fff_rustbuffer_free(buf, status)
         }
     }
 
@@ -259,95 +259,99 @@ internal interface _UniFFILib : Library {
         }
     }
 
-    fun ffi_lipabusinesslib_d2db_Wallet_object_free(`ptr`: Pointer,
+    fun ffi_lipabusinesslib_6fff_Wallet_object_free(`ptr`: Pointer,
     _uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun lipabusinesslib_d2db_Wallet_new(`config`: RustBuffer.ByValue,
+    fun lipabusinesslib_6fff_Wallet_new(`config`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): Pointer
 
-    fun lipabusinesslib_d2db_Wallet_sync(`ptr`: Pointer,
+    fun lipabusinesslib_6fff_Wallet_sync(`ptr`: Pointer,
     _uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun lipabusinesslib_d2db_Wallet_get_balance(`ptr`: Pointer,
+    fun lipabusinesslib_6fff_Wallet_get_balance(`ptr`: Pointer,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_d2db_Wallet_get_addr(`ptr`: Pointer,
+    fun lipabusinesslib_6fff_Wallet_get_addr(`ptr`: Pointer,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_d2db_Wallet_validate_addr(`ptr`: Pointer,`addr`: RustBuffer.ByValue,
+    fun lipabusinesslib_6fff_Wallet_validate_addr(`ptr`: Pointer,`addr`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_d2db_Wallet_prepare_drain_tx(`ptr`: Pointer,`addr`: RustBuffer.ByValue,`confirmInBlocks`: Int,
+    fun lipabusinesslib_6fff_Wallet_prepare_drain_tx(`ptr`: Pointer,`addr`: RustBuffer.ByValue,`confirmInBlocks`: Int,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_d2db_Wallet_sign_and_broadcast_tx(`ptr`: Pointer,`txBlob`: RustBuffer.ByValue,`spendDescriptor`: RustBuffer.ByValue,
+    fun lipabusinesslib_6fff_Wallet_sign_and_broadcast_tx(`ptr`: Pointer,`txBlob`: RustBuffer.ByValue,`spendDescriptor`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_d2db_Wallet_get_tx_status(`ptr`: Pointer,`txid`: RustBuffer.ByValue,
+    fun lipabusinesslib_6fff_Wallet_get_tx_status(`ptr`: Pointer,`txid`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_d2db_Wallet_get_spending_txs(`ptr`: Pointer,
+    fun lipabusinesslib_6fff_Wallet_get_spending_txs(`ptr`: Pointer,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_d2db_Wallet_is_drain_tx_affordable(`ptr`: Pointer,`confirmInBlocks`: Int,
+    fun lipabusinesslib_6fff_Wallet_is_drain_tx_affordable(`ptr`: Pointer,`confirmInBlocks`: Int,
     _uniffi_out_err: RustCallStatus
     ): Byte
 
-    fun ffi_lipabusinesslib_d2db_Auth_object_free(`ptr`: Pointer,
+    fun ffi_lipabusinesslib_6fff_Auth_object_free(`ptr`: Pointer,
     _uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun lipabusinesslib_d2db_Auth_new(`backendUrl`: RustBuffer.ByValue,`authLevel`: RustBuffer.ByValue,`walletKeypair`: RustBuffer.ByValue,`authKeypair`: RustBuffer.ByValue,
+    fun lipabusinesslib_6fff_Auth_new(`backendUrl`: RustBuffer.ByValue,`authLevel`: RustBuffer.ByValue,`walletKeypair`: RustBuffer.ByValue,`authKeypair`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): Pointer
 
-    fun lipabusinesslib_d2db_Auth_query_token(`ptr`: Pointer,
+    fun lipabusinesslib_6fff_Auth_query_token(`ptr`: Pointer,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_d2db_init_native_logger_once(`minLevel`: RustBuffer.ByValue,
+    fun lipabusinesslib_6fff_Auth_get_wallet_pubkey_id(`ptr`: Pointer,
+    _uniffi_out_err: RustCallStatus
+    ): RustBuffer.ByValue
+
+    fun lipabusinesslib_6fff_init_native_logger_once(`minLevel`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun lipabusinesslib_d2db_generate_mnemonic(
+    fun lipabusinesslib_6fff_generate_mnemonic(
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_d2db_derive_keys(`network`: RustBuffer.ByValue,`mnemonicString`: RustBuffer.ByValue,
+    fun lipabusinesslib_6fff_derive_keys(`network`: RustBuffer.ByValue,`mnemonicString`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_d2db_sign(`message`: RustBuffer.ByValue,`privateKey`: RustBuffer.ByValue,
+    fun lipabusinesslib_6fff_sign(`message`: RustBuffer.ByValue,`privateKey`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun lipabusinesslib_d2db_generate_keypair(
+    fun lipabusinesslib_6fff_generate_keypair(
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun ffi_lipabusinesslib_d2db_rustbuffer_alloc(`size`: Int,
+    fun ffi_lipabusinesslib_6fff_rustbuffer_alloc(`size`: Int,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun ffi_lipabusinesslib_d2db_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,
+    fun ffi_lipabusinesslib_6fff_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
-    fun ffi_lipabusinesslib_d2db_rustbuffer_free(`buf`: RustBuffer.ByValue,
+    fun ffi_lipabusinesslib_6fff_rustbuffer_free(`buf`: RustBuffer.ByValue,
     _uniffi_out_err: RustCallStatus
     ): Unit
 
-    fun ffi_lipabusinesslib_d2db_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Int,
+    fun ffi_lipabusinesslib_6fff_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Int,
     _uniffi_out_err: RustCallStatus
     ): RustBuffer.ByValue
 
@@ -691,6 +695,8 @@ public interface AuthInterface {
     @Throws(AuthException::class)
     fun `queryToken`(): String
     
+    fun `getWalletPubkeyId`(): String?
+    
 }
 
 class Auth(
@@ -699,7 +705,7 @@ class Auth(
     constructor(`backendUrl`: String, `authLevel`: AuthLevel, `walletKeypair`: KeyPair, `authKeypair`: KeyPair) :
         this(
     rustCallWithError(AuthException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_Auth_new(FfiConverterString.lower(`backendUrl`), FfiConverterTypeAuthLevel.lower(`authLevel`), FfiConverterTypeKeyPair.lower(`walletKeypair`), FfiConverterTypeKeyPair.lower(`authKeypair`), _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_Auth_new(FfiConverterString.lower(`backendUrl`), FfiConverterTypeAuthLevel.lower(`authLevel`), FfiConverterTypeKeyPair.lower(`walletKeypair`), FfiConverterTypeKeyPair.lower(`authKeypair`), _status)
 })
 
     /**
@@ -712,7 +718,7 @@ class Auth(
      */
     override protected fun freeRustArcPtr() {
         rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_d2db_Auth_object_free(this.pointer, status)
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_6fff_Auth_object_free(this.pointer, status)
         }
     }
 
@@ -720,10 +726,18 @@ class Auth(
     @Throws(AuthException::class)override fun `queryToken`(): String =
         callWithPointer {
     rustCallWithError(AuthException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_Auth_query_token(it,  _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_Auth_query_token(it,  _status)
 }
         }.let {
             FfiConverterString.lift(it)
+        }
+    override fun `getWalletPubkeyId`(): String? =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_Auth_get_wallet_pubkey_id(it,  _status)
+}
+        }.let {
+            FfiConverterOptionalString.lift(it)
         }
     
 
@@ -791,7 +805,7 @@ class Wallet(
     constructor(`config`: Config) :
         this(
     rustCallWithError(LblException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_Wallet_new(FfiConverterTypeConfig.lower(`config`), _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_Wallet_new(FfiConverterTypeConfig.lower(`config`), _status)
 })
 
     /**
@@ -804,7 +818,7 @@ class Wallet(
      */
     override protected fun freeRustArcPtr() {
         rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_d2db_Wallet_object_free(this.pointer, status)
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_6fff_Wallet_object_free(this.pointer, status)
         }
     }
 
@@ -812,7 +826,7 @@ class Wallet(
     @Throws(LblException::class)override fun `sync`() =
         callWithPointer {
     rustCallWithError(LblException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_Wallet_sync(it,  _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_Wallet_sync(it,  _status)
 }
         }
     
@@ -820,7 +834,7 @@ class Wallet(
     @Throws(LblException::class)override fun `getBalance`(): Balance =
         callWithPointer {
     rustCallWithError(LblException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_Wallet_get_balance(it,  _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_Wallet_get_balance(it,  _status)
 }
         }.let {
             FfiConverterTypeBalance.lift(it)
@@ -829,7 +843,7 @@ class Wallet(
     @Throws(LblException::class)override fun `getAddr`(): String =
         callWithPointer {
     rustCallWithError(LblException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_Wallet_get_addr(it,  _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_Wallet_get_addr(it,  _status)
 }
         }.let {
             FfiConverterString.lift(it)
@@ -837,7 +851,7 @@ class Wallet(
     override fun `validateAddr`(`addr`: String): AddressValidationResult =
         callWithPointer {
     rustCall() { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_Wallet_validate_addr(it, FfiConverterString.lower(`addr`),  _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_Wallet_validate_addr(it, FfiConverterString.lower(`addr`),  _status)
 }
         }.let {
             FfiConverterTypeAddressValidationResult.lift(it)
@@ -846,7 +860,7 @@ class Wallet(
     @Throws(LblException::class)override fun `prepareDrainTx`(`addr`: String, `confirmInBlocks`: UInt): Tx =
         callWithPointer {
     rustCallWithError(LblException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_Wallet_prepare_drain_tx(it, FfiConverterString.lower(`addr`), FfiConverterUInt.lower(`confirmInBlocks`),  _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_Wallet_prepare_drain_tx(it, FfiConverterString.lower(`addr`), FfiConverterUInt.lower(`confirmInBlocks`),  _status)
 }
         }.let {
             FfiConverterTypeTx.lift(it)
@@ -855,7 +869,7 @@ class Wallet(
     @Throws(LblException::class)override fun `signAndBroadcastTx`(`txBlob`: List<UByte>, `spendDescriptor`: String): TxDetails =
         callWithPointer {
     rustCallWithError(LblException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_Wallet_sign_and_broadcast_tx(it, FfiConverterSequenceUByte.lower(`txBlob`), FfiConverterString.lower(`spendDescriptor`),  _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_Wallet_sign_and_broadcast_tx(it, FfiConverterSequenceUByte.lower(`txBlob`), FfiConverterString.lower(`spendDescriptor`),  _status)
 }
         }.let {
             FfiConverterTypeTxDetails.lift(it)
@@ -864,7 +878,7 @@ class Wallet(
     @Throws(LblException::class)override fun `getTxStatus`(`txid`: String): TxStatus =
         callWithPointer {
     rustCallWithError(LblException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_Wallet_get_tx_status(it, FfiConverterString.lower(`txid`),  _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_Wallet_get_tx_status(it, FfiConverterString.lower(`txid`),  _status)
 }
         }.let {
             FfiConverterTypeTxStatus.lift(it)
@@ -873,7 +887,7 @@ class Wallet(
     @Throws(LblException::class)override fun `getSpendingTxs`(): List<TxDetails> =
         callWithPointer {
     rustCallWithError(LblException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_Wallet_get_spending_txs(it,  _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_Wallet_get_spending_txs(it,  _status)
 }
         }.let {
             FfiConverterSequenceTypeTxDetails.lift(it)
@@ -882,7 +896,7 @@ class Wallet(
     @Throws(LblException::class)override fun `isDrainTxAffordable`(`confirmInBlocks`: UInt): Boolean =
         callWithPointer {
     rustCallWithError(LblException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_Wallet_is_drain_tx_affordable(it, FfiConverterUInt.lower(`confirmInBlocks`),  _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_Wallet_is_drain_tx_affordable(it, FfiConverterUInt.lower(`confirmInBlocks`),  _status)
 }
         }.let {
             FfiConverterBoolean.lift(it)
@@ -1180,7 +1194,7 @@ public object FfiConverterTypeAddressValidationResult: FfiConverterRustBuffer<Ad
 
 
 enum class AuthLevel {
-    BASIC,OWNER,EMPLOYEE;
+    PSEUDONYMOUS,OWNER,EMPLOYEE;
 }
 
 public object FfiConverterTypeAuthLevel: FfiConverterRustBuffer<AuthLevel> {
@@ -1569,6 +1583,35 @@ public object FfiConverterTypeLblError : FfiConverterRustBuffer<LblException> {
 
 
 
+public object FfiConverterOptionalString: FfiConverterRustBuffer<String?> {
+    override fun read(buf: ByteBuffer): String? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterString.read(buf)
+    }
+
+    override fun allocationSize(value: String?): Int {
+        if (value == null) {
+            return 1
+        } else {
+            return 1 + FfiConverterString.allocationSize(value)
+        }
+    }
+
+    override fun write(value: String?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+
+
+
 public object FfiConverterSequenceUByte: FfiConverterRustBuffer<List<UByte>> {
     override fun read(buf: ByteBuffer): List<UByte> {
         val len = buf.getInt()
@@ -1644,7 +1687,7 @@ public object FfiConverterSequenceTypeTxDetails: FfiConverterRustBuffer<List<TxD
 fun `initNativeLoggerOnce`(`minLevel`: LogLevel) =
     
     rustCall() { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_init_native_logger_once(FfiConverterTypeLogLevel.lower(`minLevel`), _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_init_native_logger_once(FfiConverterTypeLogLevel.lower(`minLevel`), _status)
 }
 
 @Throws(LblException::class)
@@ -1652,7 +1695,7 @@ fun `initNativeLoggerOnce`(`minLevel`: LogLevel) =
 fun `generateMnemonic`(): List<String> {
     return FfiConverterSequenceString.lift(
     rustCallWithError(LblException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_generate_mnemonic( _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_generate_mnemonic( _status)
 })
 }
 
@@ -1662,7 +1705,7 @@ fun `generateMnemonic`(): List<String> {
 fun `deriveKeys`(`network`: Network, `mnemonicString`: List<String>): WalletKeys {
     return FfiConverterTypeWalletKeys.lift(
     rustCallWithError(LblException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_derive_keys(FfiConverterTypeNetwork.lower(`network`), FfiConverterSequenceString.lower(`mnemonicString`), _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_derive_keys(FfiConverterTypeNetwork.lower(`network`), FfiConverterSequenceString.lower(`mnemonicString`), _status)
 })
 }
 
@@ -1672,7 +1715,7 @@ fun `deriveKeys`(`network`: Network, `mnemonicString`: List<String>): WalletKeys
 fun `sign`(`message`: String, `privateKey`: String): String {
     return FfiConverterString.lift(
     rustCallWithError(LblException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_sign(FfiConverterString.lower(`message`), FfiConverterString.lower(`privateKey`), _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_sign(FfiConverterString.lower(`message`), FfiConverterString.lower(`privateKey`), _status)
 })
 }
 
@@ -1681,7 +1724,7 @@ fun `sign`(`message`: String, `privateKey`: String): String {
 fun `generateKeypair`(): KeyPair {
     return FfiConverterTypeKeyPair.lift(
     rustCall() { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_d2db_generate_keypair( _status)
+    _UniFFILib.INSTANCE.lipabusinesslib_6fff_generate_keypair( _status)
 })
 }
 
