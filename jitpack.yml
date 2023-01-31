@@ -1,6 +1,6 @@
 before_install:
-  - wget https://github.com/getlipa/lipa-business-lib-android/releases/download/v0.1.0-alpha.22.badger.1/jniLibs.zip
-  - if [ $(shasum -a 256 jniLibs.zip | sed 's/ .*//') != '9eec9f406275a2e38fedb82b7e4e30c036f9e21ca92c43f96c5141e696076e1d' ]; then exit 1; fi
+  - wget https://github.com/getlipa/lipa-business-lib-android/releases/download/v0.1.0-alpha.22.badger.2/jniLibs.zip
+  - if [ $(shasum -a 256 jniLibs.zip | sed 's/ .*//') != 'ae1ab03b806a6d421d1db514aa804a3461fdbf0bd6bfa6343f77432b7460fc22' ]; then exit 1; fi
   - unzip -o jniLibs.zip
   - mv jniLibs LipaBusinessLib/src/main/jniLibs
   - wget https://github.com/java-native-access/jna/archive/refs/tags/5.8.0.zip
