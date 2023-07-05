@@ -18,12 +18,15 @@ package uniffi.lipabusinesslib;
 // helpers directly inline like we're doing here.
 
 import com.sun.jna.Library
+import com.sun.jna.IntegerType
 import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.Structure
-import com.sun.jna.ptr.ByReference
+import com.sun.jna.Callback
+import com.sun.jna.ptr.*
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -37,12 +40,12 @@ open class RustBuffer : Structure() {
     @JvmField var len: Int = 0
     @JvmField var data: Pointer? = null
 
-    class ByValue : RustBuffer(), Structure.ByValue
-    class ByReference : RustBuffer(), Structure.ByReference
+    class ByValue: RustBuffer(), Structure.ByValue
+    class ByReference: RustBuffer(), Structure.ByReference
 
     companion object {
         internal fun alloc(size: Int = 0) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_ee8f_rustbuffer_alloc(size, status).also {
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_rustbuffer_alloc(size, status).also {
                 if(it.data == null) {
                    throw RuntimeException("RustBuffer.alloc() returned null data pointer (size=${size})")
                }
@@ -50,7 +53,7 @@ open class RustBuffer : Structure() {
         }
 
         internal fun free(buf: RustBuffer.ByValue) = rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_ee8f_rustbuffer_free(buf, status)
+            _UniFFILib.INSTANCE.ffi_lipabusinesslib_rustbuffer_free(buf, status)
         }
     }
 
@@ -77,6 +80,19 @@ class RustBufferByReference : ByReference(16) {
         pointer.setInt(0, value.capacity)
         pointer.setInt(4, value.len)
         pointer.setPointer(8, value.data)
+    }
+
+    /**
+     * Get a `RustBuffer.ByValue` from this reference.
+     */
+    fun getValue(): RustBuffer.ByValue {
+        val pointer = getPointer()
+        val value = RustBuffer.ByValue()
+        value.writeField("capacity", pointer.getInt(0))
+        value.writeField("len", pointer.getInt(4))
+        value.writeField("data", pointer.getPointer(8))
+
+        return value
     }
 }
 
@@ -169,19 +185,21 @@ public interface FfiConverterRustBuffer<KotlinType>: FfiConverter<KotlinType, Ru
 // Error runtime.
 @Structure.FieldOrder("code", "error_buf")
 internal open class RustCallStatus : Structure() {
-    @JvmField var code: Int = 0
+    @JvmField var code: Byte = 0
     @JvmField var error_buf: RustBuffer.ByValue = RustBuffer.ByValue()
 
+    class ByValue: RustCallStatus(), Structure.ByValue
+
     fun isSuccess(): Boolean {
-        return code == 0
+        return code == 0.toByte()
     }
 
     fun isError(): Boolean {
-        return code == 1
+        return code == 1.toByte()
     }
 
     fun isPanic(): Boolean {
-        return code == 2
+        return code == 2.toByte()
     }
 }
 
@@ -200,8 +218,14 @@ interface CallStatusErrorHandler<E> {
 private inline fun <U, E: Exception> rustCallWithError(errorHandler: CallStatusErrorHandler<E>, callback: (RustCallStatus) -> U): U {
     var status = RustCallStatus();
     val return_value = callback(status)
+    checkCallStatus(errorHandler, status)
+    return return_value
+}
+
+// Check RustCallStatus and throw an error if the call wasn't successful
+private fun<E: Exception> checkCallStatus(errorHandler: CallStatusErrorHandler<E>, status: RustCallStatus) {
     if (status.isSuccess()) {
-        return return_value
+        return
     } else if (status.isError()) {
         throw errorHandler.lift(status.error_buf)
     } else if (status.isPanic()) {
@@ -231,6 +255,86 @@ private inline fun <U> rustCall(callback: (RustCallStatus) -> U): U {
     return rustCallWithError(NullCallStatusErrorHandler, callback);
 }
 
+// IntegerType that matches Rust's `usize` / C's `size_t`
+public class USize(value: Long = 0) : IntegerType(Native.SIZE_T_SIZE, value, true) {
+    // This is needed to fill in the gaps of IntegerType's implementation of Number for Kotlin.
+    override fun toByte() = toInt().toByte()
+    override fun toChar() = toInt().toChar()
+    override fun toShort() = toInt().toShort()
+
+    fun writeToBuffer(buf: ByteBuffer) {
+        // Make sure we always write usize integers using native byte-order, since they may be
+        // casted to pointer values
+        buf.order(ByteOrder.nativeOrder())
+        try {
+            when (Native.SIZE_T_SIZE) {
+                4 -> buf.putInt(toInt())
+                8 -> buf.putLong(toLong())
+                else -> throw RuntimeException("Invalid SIZE_T_SIZE: ${Native.SIZE_T_SIZE}")
+            }
+        } finally {
+            buf.order(ByteOrder.BIG_ENDIAN)
+        }
+    }
+
+    companion object {
+        val size: Int
+            get() = Native.SIZE_T_SIZE
+
+        fun readFromBuffer(buf: ByteBuffer) : USize {
+            // Make sure we always read usize integers using native byte-order, since they may be
+            // casted from pointer values
+            buf.order(ByteOrder.nativeOrder())
+            try {
+                return when (Native.SIZE_T_SIZE) {
+                    4 -> USize(buf.getInt().toLong())
+                    8 -> USize(buf.getLong())
+                    else -> throw RuntimeException("Invalid SIZE_T_SIZE: ${Native.SIZE_T_SIZE}")
+                }
+            } finally {
+                buf.order(ByteOrder.BIG_ENDIAN)
+            }
+        }
+    }
+}
+
+
+// Map handles to objects
+//
+// This is used when the Rust code expects an opaque pointer to represent some foreign object.
+// Normally we would pass a pointer to the object, but JNA doesn't support getting a pointer from an
+// object reference , nor does it support leaking a reference to Rust.
+//
+// Instead, this class maps USize values to objects so that we can pass a pointer-sized type to
+// Rust when it needs an opaque pointer.
+//
+// TODO: refactor callbacks to use this class
+internal class UniFfiHandleMap<T: Any> {
+    private val map = ConcurrentHashMap<USize, T>()
+    // Use AtomicInteger for our counter, since we may be on a 32-bit system.  4 billion possible
+    // values seems like enough. If somehow we generate 4 billion handles, then this will wrap
+    // around back to zero and we can assume the first handle generated will have been dropped by
+    // then.
+    private val counter = java.util.concurrent.atomic.AtomicInteger(0)
+
+    val size: Int
+        get() = map.size
+
+    fun insert(obj: T): USize {
+        val handle = USize(counter.getAndAdd(1).toLong())
+        map.put(handle, obj)
+        return handle
+    }
+
+    fun get(handle: USize): T? {
+        return map.get(handle)
+    }
+
+    fun remove(handle: USize) {
+        map.remove(handle)
+    }
+}
+
 // Contains loading, initialization code,
 // and the FFI Function declarations in a com.sun.jna.Library.
 @Synchronized
@@ -255,135 +359,179 @@ internal interface _UniFFILib : Library {
     companion object {
         internal val INSTANCE: _UniFFILib by lazy {
             loadIndirect<_UniFFILib>(componentName = "lipabusinesslib")
-            
+            .also { lib: _UniFFILib ->
+                uniffiCheckContractApiVersion(lib)
+                uniffiCheckApiChecksums(lib)
+                }
         }
     }
 
-    fun ffi_lipabusinesslib_ee8f_Wallet_object_free(`ptr`: Pointer,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_free_wallet(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
-
-    fun lipabusinesslib_ee8f_Wallet_new(`config`: RustBuffer.ByValue,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_constructor_wallet_new(`config`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Pointer
-
-    fun lipabusinesslib_ee8f_Wallet_sync(`ptr`: Pointer,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_method_wallet_sync(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
-
-    fun lipabusinesslib_ee8f_Wallet_get_balance(`ptr`: Pointer,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_method_wallet_get_balance(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun lipabusinesslib_ee8f_Wallet_get_addr(`ptr`: Pointer,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_method_wallet_get_addr(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun lipabusinesslib_ee8f_Wallet_parse_address(`ptr`: Pointer,`address`: RustBuffer.ByValue,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_method_wallet_parse_address(`ptr`: Pointer,`address`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun lipabusinesslib_ee8f_Wallet_prepare_drain_tx(`ptr`: Pointer,`addr`: RustBuffer.ByValue,`confirmInBlocks`: Int,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_method_wallet_prepare_drain_tx(`ptr`: Pointer,`addr`: RustBuffer.ByValue,`confirmInBlocks`: Int,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun lipabusinesslib_ee8f_Wallet_sign_and_broadcast_tx(`ptr`: Pointer,`txBlob`: RustBuffer.ByValue,`spendDescriptor`: RustBuffer.ByValue,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_method_wallet_sign_and_broadcast_tx(`ptr`: Pointer,`txBlob`: RustBuffer.ByValue,`spendDescriptor`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun lipabusinesslib_ee8f_Wallet_get_tx_status(`ptr`: Pointer,`txid`: RustBuffer.ByValue,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_method_wallet_get_tx_status(`ptr`: Pointer,`txid`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun lipabusinesslib_ee8f_Wallet_get_spending_txs(`ptr`: Pointer,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_method_wallet_get_spending_txs(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun lipabusinesslib_ee8f_Wallet_is_drain_tx_affordable(`ptr`: Pointer,`confirmInBlocks`: Int,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_method_wallet_is_drain_tx_affordable(`ptr`: Pointer,`confirmInBlocks`: Int,_uniffi_out_err: RustCallStatus, 
     ): Byte
-
-    fun ffi_lipabusinesslib_ee8f_Auth_object_free(`ptr`: Pointer,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_free_auth(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
-
-    fun lipabusinesslib_ee8f_Auth_new(`backendUrl`: RustBuffer.ByValue,`authLevel`: RustBuffer.ByValue,`walletKeypair`: RustBuffer.ByValue,`authKeypair`: RustBuffer.ByValue,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_constructor_auth_new(`backendUrl`: RustBuffer.ByValue,`authLevel`: RustBuffer.ByValue,`walletKeypair`: RustBuffer.ByValue,`authKeypair`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Pointer
-
-    fun lipabusinesslib_ee8f_Auth_query_token(`ptr`: Pointer,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_method_auth_query_token(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun lipabusinesslib_ee8f_Auth_get_wallet_pubkey_id(`ptr`: Pointer,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_method_auth_get_wallet_pubkey_id(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun lipabusinesslib_ee8f_init_native_logger_once(`minLevel`: RustBuffer.ByValue,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_func_init_native_logger_once(`minLevel`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Unit
-
-    fun lipabusinesslib_ee8f_generate_mnemonic(
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_func_generate_mnemonic(_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun lipabusinesslib_ee8f_derive_keys(`network`: RustBuffer.ByValue,`mnemonicString`: RustBuffer.ByValue,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_func_derive_keys(`network`: RustBuffer.ByValue,`mnemonicString`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun lipabusinesslib_ee8f_sign(`message`: RustBuffer.ByValue,`privateKey`: RustBuffer.ByValue,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_func_sign(`message`: RustBuffer.ByValue,`privateKey`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun lipabusinesslib_ee8f_generate_keypair(
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_func_generate_keypair(_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun lipabusinesslib_ee8f_words_by_prefix(`prefix`: RustBuffer.ByValue,
-    _uniffi_out_err: RustCallStatus
+    fun uniffi_lipabusinesslib_fn_func_words_by_prefix(`prefix`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun ffi_lipabusinesslib_ee8f_rustbuffer_alloc(`size`: Int,
-    _uniffi_out_err: RustCallStatus
+    fun ffi_lipabusinesslib_rustbuffer_alloc(`size`: Int,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun ffi_lipabusinesslib_ee8f_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,
-    _uniffi_out_err: RustCallStatus
+    fun ffi_lipabusinesslib_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
-    fun ffi_lipabusinesslib_ee8f_rustbuffer_free(`buf`: RustBuffer.ByValue,
-    _uniffi_out_err: RustCallStatus
+    fun ffi_lipabusinesslib_rustbuffer_free(`buf`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Unit
-
-    fun ffi_lipabusinesslib_ee8f_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Int,
-    _uniffi_out_err: RustCallStatus
+    fun ffi_lipabusinesslib_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Int,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
-
+    fun uniffi_lipabusinesslib_checksum_func_init_native_logger_once(
+    ): Short
+    fun uniffi_lipabusinesslib_checksum_func_generate_mnemonic(
+    ): Short
+    fun uniffi_lipabusinesslib_checksum_func_derive_keys(
+    ): Short
+    fun uniffi_lipabusinesslib_checksum_func_sign(
+    ): Short
+    fun uniffi_lipabusinesslib_checksum_func_generate_keypair(
+    ): Short
+    fun uniffi_lipabusinesslib_checksum_func_words_by_prefix(
+    ): Short
+    fun uniffi__checksum_method_wallet_sync(
+    ): Short
+    fun uniffi__checksum_method_wallet_get_balance(
+    ): Short
+    fun uniffi__checksum_method_wallet_get_addr(
+    ): Short
+    fun uniffi__checksum_method_wallet_parse_address(
+    ): Short
+    fun uniffi__checksum_method_wallet_prepare_drain_tx(
+    ): Short
+    fun uniffi__checksum_method_wallet_sign_and_broadcast_tx(
+    ): Short
+    fun uniffi__checksum_method_wallet_get_tx_status(
+    ): Short
+    fun uniffi__checksum_method_wallet_get_spending_txs(
+    ): Short
+    fun uniffi__checksum_method_wallet_is_drain_tx_affordable(
+    ): Short
+    fun uniffi__checksum_method_auth_query_token(
+    ): Short
+    fun uniffi__checksum_method_auth_get_wallet_pubkey_id(
+    ): Short
+    fun uniffi__checksum_constructor_wallet_new(
+    ): Short
+    fun uniffi__checksum_constructor_auth_new(
+    ): Short
+    fun ffi_lipabusinesslib_uniffi_contract_version(
+    ): Int
     
+}
+
+private fun uniffiCheckContractApiVersion(lib: _UniFFILib) {
+    // Get the bindings contract version from our ComponentInterface
+    val bindings_contract_version = 22
+    // Get the scaffolding contract version by calling the into the dylib
+    val scaffolding_contract_version = lib.ffi_lipabusinesslib_uniffi_contract_version()
+    if (bindings_contract_version != scaffolding_contract_version) {
+        throw RuntimeException("UniFFI contract version mismatch: try cleaning and rebuilding your project")
+    }
+}
+
+@Suppress("UNUSED_PARAMETER")
+private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
+    if (lib.uniffi_lipabusinesslib_checksum_func_init_native_logger_once() != 53918.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_lipabusinesslib_checksum_func_generate_mnemonic() != 53485.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_lipabusinesslib_checksum_func_derive_keys() != 44497.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_lipabusinesslib_checksum_func_sign() != 12111.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_lipabusinesslib_checksum_func_generate_keypair() != 60919.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_lipabusinesslib_checksum_func_words_by_prefix() != 35266.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi__checksum_method_wallet_sync() != 26360.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi__checksum_method_wallet_get_balance() != 52479.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi__checksum_method_wallet_get_addr() != 58380.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi__checksum_method_wallet_parse_address() != 62227.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi__checksum_method_wallet_prepare_drain_tx() != 62005.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi__checksum_method_wallet_sign_and_broadcast_tx() != 15725.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi__checksum_method_wallet_get_tx_status() != 55239.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi__checksum_method_wallet_get_spending_txs() != 57402.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi__checksum_method_wallet_is_drain_tx_affordable() != 35240.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi__checksum_method_auth_query_token() != 33853.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi__checksum_method_auth_get_wallet_pubkey_id() != 10146.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi__checksum_constructor_wallet_new() != 19579.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi__checksum_constructor_auth_new() != 36882.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
 }
 
 // Public interface members begin here.
 
-
-public object FfiConverterUByte: FfiConverter<UByte, Byte> {
-    override fun lift(value: Byte): UByte {
-        return value.toUByte()
-    }
-
-    override fun read(buf: ByteBuffer): UByte {
-        return lift(buf.get())
-    }
-
-    override fun lower(value: UByte): Byte {
-        return value.toByte()
-    }
-
-    override fun allocationSize(value: UByte) = 1
-
-    override fun write(value: UByte, buf: ByteBuffer) {
-        buf.put(value.toByte())
-    }
-}
 
 public object FfiConverterUInt: FfiConverter<UInt, Int> {
     override fun lift(value: Int): UInt {
@@ -488,6 +636,22 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
         val byteArr = value.toByteArray(Charsets.UTF_8)
         buf.putInt(byteArr.size)
         buf.put(byteArr)
+    }
+}
+
+public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
+    override fun read(buf: ByteBuffer): ByteArray {
+        val len = buf.getInt()
+        val byteArr = ByteArray(len)
+        buf.get(byteArr)
+        return byteArr
+    }
+    override fun allocationSize(value: ByteArray): Int {
+        return 4 + value.size
+    }
+    override fun write(value: ByteArray, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        buf.put(value)
     }
 }
 
@@ -695,12 +859,9 @@ abstract class FFIObject(
 }
 
 public interface AuthInterface {
-    
     @Throws(AuthException::class)
     fun `queryToken`(): String
-    
     fun `getWalletPubkeyId`(): String?
-    
 }
 
 class Auth(
@@ -709,7 +870,7 @@ class Auth(
     constructor(`backendUrl`: String, `authLevel`: AuthLevel, `walletKeypair`: KeyPair, `authKeypair`: KeyPair) :
         this(
     rustCallWithError(AuthException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_Auth_new(FfiConverterString.lower(`backendUrl`), FfiConverterTypeAuthLevel.lower(`authLevel`), FfiConverterTypeKeyPair.lower(`walletKeypair`), FfiConverterTypeKeyPair.lower(`authKeypair`), _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_constructor_auth_new(FfiConverterString.lower(`backendUrl`),FfiConverterTypeAuthLevel.lower(`authLevel`),FfiConverterTypeKeyPair.lower(`walletKeypair`),FfiConverterTypeKeyPair.lower(`authKeypair`),_status)
 })
 
     /**
@@ -722,7 +883,7 @@ class Auth(
      */
     override protected fun freeRustArcPtr() {
         rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_ee8f_Auth_object_free(this.pointer, status)
+            _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_free_auth(this.pointer, status)
         }
     }
 
@@ -730,19 +891,25 @@ class Auth(
     @Throws(AuthException::class)override fun `queryToken`(): String =
         callWithPointer {
     rustCallWithError(AuthException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_Auth_query_token(it,  _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_method_auth_query_token(it,
+        
+        _status)
 }
         }.let {
             FfiConverterString.lift(it)
         }
+    
     override fun `getWalletPubkeyId`(): String? =
         callWithPointer {
     rustCall() { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_Auth_get_wallet_pubkey_id(it,  _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_method_auth_get_wallet_pubkey_id(it,
+        
+        _status)
 }
         }.let {
             FfiConverterOptionalString.lift(it)
         }
+    
     
 
     
@@ -774,34 +941,16 @@ public object FfiConverterTypeAuth: FfiConverter<Auth, Pointer> {
 
 
 public interface WalletInterface {
-    
     @Throws(WalletException::class)
-    fun `sync`()
-    
-    @Throws(WalletException::class)
-    fun `getBalance`(): Balance
-    
-    @Throws(WalletException::class)
-    fun `getAddr`(): String
-    
-    @Throws(AddressParsingException::class)
-    fun `parseAddress`(`address`: String): String
-    
-    @Throws(WalletException::class)
-    fun `prepareDrainTx`(`addr`: String, `confirmInBlocks`: UInt): Tx
-    
-    @Throws(WalletException::class)
-    fun `signAndBroadcastTx`(`txBlob`: List<UByte>, `spendDescriptor`: String): TxDetails
-    
-    @Throws(WalletException::class)
-    fun `getTxStatus`(`txid`: String): TxStatus
-    
-    @Throws(WalletException::class)
-    fun `getSpendingTxs`(): List<TxDetails>
-    
-    @Throws(WalletException::class)
+    fun `sync`()@Throws(WalletException::class)
+    fun `getBalance`(): Balance@Throws(WalletException::class)
+    fun `getAddr`(): String@Throws(AddressParsingException::class)
+    fun `parseAddress`(`address`: String): String@Throws(WalletException::class)
+    fun `prepareDrainTx`(`addr`: String, `confirmInBlocks`: UInt): Tx@Throws(WalletException::class)
+    fun `signAndBroadcastTx`(`txBlob`: ByteArray, `spendDescriptor`: String): TxDetails@Throws(WalletException::class)
+    fun `getTxStatus`(`txid`: String): TxStatus@Throws(WalletException::class)
+    fun `getSpendingTxs`(): List<TxDetails>@Throws(WalletException::class)
     fun `isDrainTxAffordable`(`confirmInBlocks`: UInt): Boolean
-    
 }
 
 class Wallet(
@@ -810,7 +959,7 @@ class Wallet(
     constructor(`config`: Config) :
         this(
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_Wallet_new(FfiConverterTypeConfig.lower(`config`), _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_constructor_wallet_new(FfiConverterTypeConfig.lower(`config`),_status)
 })
 
     /**
@@ -823,7 +972,7 @@ class Wallet(
      */
     override protected fun freeRustArcPtr() {
         rustCall() { status ->
-            _UniFFILib.INSTANCE.ffi_lipabusinesslib_ee8f_Wallet_object_free(this.pointer, status)
+            _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_free_wallet(this.pointer, status)
         }
     }
 
@@ -831,82 +980,109 @@ class Wallet(
     @Throws(WalletException::class)override fun `sync`() =
         callWithPointer {
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_Wallet_sync(it,  _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_method_wallet_sync(it,
+        
+        _status)
 }
         }
+    
     
     
     @Throws(WalletException::class)override fun `getBalance`(): Balance =
         callWithPointer {
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_Wallet_get_balance(it,  _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_method_wallet_get_balance(it,
+        
+        _status)
 }
         }.let {
             FfiConverterTypeBalance.lift(it)
         }
     
+    
     @Throws(WalletException::class)override fun `getAddr`(): String =
         callWithPointer {
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_Wallet_get_addr(it,  _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_method_wallet_get_addr(it,
+        
+        _status)
 }
         }.let {
             FfiConverterString.lift(it)
         }
+    
     
     @Throws(AddressParsingException::class)override fun `parseAddress`(`address`: String): String =
         callWithPointer {
     rustCallWithError(AddressParsingException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_Wallet_parse_address(it, FfiConverterString.lower(`address`),  _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_method_wallet_parse_address(it,
+        FfiConverterString.lower(`address`),
+        _status)
 }
         }.let {
             FfiConverterString.lift(it)
         }
     
+    
     @Throws(WalletException::class)override fun `prepareDrainTx`(`addr`: String, `confirmInBlocks`: UInt): Tx =
         callWithPointer {
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_Wallet_prepare_drain_tx(it, FfiConverterString.lower(`addr`), FfiConverterUInt.lower(`confirmInBlocks`),  _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_method_wallet_prepare_drain_tx(it,
+        FfiConverterString.lower(`addr`),FfiConverterUInt.lower(`confirmInBlocks`),
+        _status)
 }
         }.let {
             FfiConverterTypeTx.lift(it)
         }
     
-    @Throws(WalletException::class)override fun `signAndBroadcastTx`(`txBlob`: List<UByte>, `spendDescriptor`: String): TxDetails =
+    
+    @Throws(WalletException::class)override fun `signAndBroadcastTx`(`txBlob`: ByteArray, `spendDescriptor`: String): TxDetails =
         callWithPointer {
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_Wallet_sign_and_broadcast_tx(it, FfiConverterSequenceUByte.lower(`txBlob`), FfiConverterString.lower(`spendDescriptor`),  _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_method_wallet_sign_and_broadcast_tx(it,
+        FfiConverterByteArray.lower(`txBlob`),FfiConverterString.lower(`spendDescriptor`),
+        _status)
 }
         }.let {
             FfiConverterTypeTxDetails.lift(it)
         }
     
+    
     @Throws(WalletException::class)override fun `getTxStatus`(`txid`: String): TxStatus =
         callWithPointer {
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_Wallet_get_tx_status(it, FfiConverterString.lower(`txid`),  _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_method_wallet_get_tx_status(it,
+        FfiConverterString.lower(`txid`),
+        _status)
 }
         }.let {
             FfiConverterTypeTxStatus.lift(it)
         }
     
+    
     @Throws(WalletException::class)override fun `getSpendingTxs`(): List<TxDetails> =
         callWithPointer {
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_Wallet_get_spending_txs(it,  _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_method_wallet_get_spending_txs(it,
+        
+        _status)
 }
         }.let {
             FfiConverterSequenceTypeTxDetails.lift(it)
         }
     
+    
     @Throws(WalletException::class)override fun `isDrainTxAffordable`(`confirmInBlocks`: UInt): Boolean =
         callWithPointer {
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_Wallet_is_drain_tx_affordable(it, FfiConverterUInt.lower(`confirmInBlocks`),  _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_method_wallet_is_drain_tx_affordable(it,
+        FfiConverterUInt.lower(`confirmInBlocks`),
+        _status)
 }
         }.let {
             FfiConverterBoolean.lift(it)
         }
+    
     
 
     
@@ -1071,7 +1247,7 @@ public object FfiConverterTypeKeyPair: FfiConverterRustBuffer<KeyPair> {
 
 data class Tx (
     var `id`: String, 
-    var `blob`: List<UByte>, 
+    var `blob`: ByteArray, 
     var `onChainFeeSat`: ULong, 
     var `outputSat`: ULong
 ) {
@@ -1082,7 +1258,7 @@ public object FfiConverterTypeTx: FfiConverterRustBuffer<Tx> {
     override fun read(buf: ByteBuffer): Tx {
         return Tx(
             FfiConverterString.read(buf),
-            FfiConverterSequenceUByte.read(buf),
+            FfiConverterByteArray.read(buf),
             FfiConverterULong.read(buf),
             FfiConverterULong.read(buf),
         )
@@ -1090,14 +1266,14 @@ public object FfiConverterTypeTx: FfiConverterRustBuffer<Tx> {
 
     override fun allocationSize(value: Tx) = (
             FfiConverterString.allocationSize(value.`id`) +
-            FfiConverterSequenceUByte.allocationSize(value.`blob`) +
+            FfiConverterByteArray.allocationSize(value.`blob`) +
             FfiConverterULong.allocationSize(value.`onChainFeeSat`) +
             FfiConverterULong.allocationSize(value.`outputSat`)
     )
 
     override fun write(value: Tx, buf: ByteBuffer) {
             FfiConverterString.write(value.`id`, buf)
-            FfiConverterSequenceUByte.write(value.`blob`, buf)
+            FfiConverterByteArray.write(value.`blob`, buf)
             FfiConverterULong.write(value.`onChainFeeSat`, buf)
             FfiConverterULong.write(value.`outputSat`, buf)
     }
@@ -1172,196 +1348,6 @@ public object FfiConverterTypeWalletKeys: FfiConverterRustBuffer<WalletKeys> {
             FfiConverterTypeDescriptors.write(value.`walletDescriptors`, buf)
     }
 }
-
-
-
-
-enum class AuthLevel {
-    PSEUDONYMOUS,OWNER,EMPLOYEE;
-}
-
-public object FfiConverterTypeAuthLevel: FfiConverterRustBuffer<AuthLevel> {
-    override fun read(buf: ByteBuffer) = try {
-        AuthLevel.values()[buf.getInt() - 1]
-    } catch (e: IndexOutOfBoundsException) {
-        throw RuntimeException("invalid enum value, something is very wrong!!", e)
-    }
-
-    override fun allocationSize(value: AuthLevel) = 4
-
-    override fun write(value: AuthLevel, buf: ByteBuffer) {
-        buf.putInt(value.ordinal + 1)
-    }
-}
-
-
-
-
-
-
-enum class AuthRuntimeErrorCode {
-    AUTH_SERVICE_ERROR,ACCESS_EXPIRED,NETWORK_ERROR,GENERIC_ERROR,CORRUPT_DATA,OBJECT_NOT_FOUND;
-}
-
-public object FfiConverterTypeAuthRuntimeErrorCode: FfiConverterRustBuffer<AuthRuntimeErrorCode> {
-    override fun read(buf: ByteBuffer) = try {
-        AuthRuntimeErrorCode.values()[buf.getInt() - 1]
-    } catch (e: IndexOutOfBoundsException) {
-        throw RuntimeException("invalid enum value, something is very wrong!!", e)
-    }
-
-    override fun allocationSize(value: AuthRuntimeErrorCode) = 4
-
-    override fun write(value: AuthRuntimeErrorCode, buf: ByteBuffer) {
-        buf.putInt(value.ordinal + 1)
-    }
-}
-
-
-
-
-
-
-enum class LogLevel {
-    ERROR,WARN,INFO,DEBUG,TRACE;
-}
-
-public object FfiConverterTypeLogLevel: FfiConverterRustBuffer<LogLevel> {
-    override fun read(buf: ByteBuffer) = try {
-        LogLevel.values()[buf.getInt() - 1]
-    } catch (e: IndexOutOfBoundsException) {
-        throw RuntimeException("invalid enum value, something is very wrong!!", e)
-    }
-
-    override fun allocationSize(value: LogLevel) = 4
-
-    override fun write(value: LogLevel, buf: ByteBuffer) {
-        buf.putInt(value.ordinal + 1)
-    }
-}
-
-
-
-
-
-
-enum class Network {
-    BITCOIN,TESTNET,SIGNET,REGTEST;
-}
-
-public object FfiConverterTypeNetwork: FfiConverterRustBuffer<Network> {
-    override fun read(buf: ByteBuffer) = try {
-        Network.values()[buf.getInt() - 1]
-    } catch (e: IndexOutOfBoundsException) {
-        throw RuntimeException("invalid enum value, something is very wrong!!", e)
-    }
-
-    override fun allocationSize(value: Network) = 4
-
-    override fun write(value: Network, buf: ByteBuffer) {
-        buf.putInt(value.ordinal + 1)
-    }
-}
-
-
-
-
-
-
-sealed class TxStatus {
-    object NotInMempool : TxStatus()
-    
-    object InMempool : TxStatus()
-    
-    data class Confirmed(
-        val `numberOfBlocks`: UInt, 
-        val `confirmedAt`: java.time.Instant
-        ) : TxStatus()
-    
-
-    
-}
-
-public object FfiConverterTypeTxStatus : FfiConverterRustBuffer<TxStatus>{
-    override fun read(buf: ByteBuffer): TxStatus {
-        return when(buf.getInt()) {
-            1 -> TxStatus.NotInMempool
-            2 -> TxStatus.InMempool
-            3 -> TxStatus.Confirmed(
-                FfiConverterUInt.read(buf),
-                FfiConverterTimestamp.read(buf),
-                )
-            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
-        }
-    }
-
-    override fun allocationSize(value: TxStatus) = when(value) {
-        is TxStatus.NotInMempool -> {
-            // Add the size for the Int that specifies the variant plus the size needed for all fields
-            (
-                4
-            )
-        }
-        is TxStatus.InMempool -> {
-            // Add the size for the Int that specifies the variant plus the size needed for all fields
-            (
-                4
-            )
-        }
-        is TxStatus.Confirmed -> {
-            // Add the size for the Int that specifies the variant plus the size needed for all fields
-            (
-                4
-                + FfiConverterUInt.allocationSize(value.`numberOfBlocks`)
-                + FfiConverterTimestamp.allocationSize(value.`confirmedAt`)
-            )
-        }
-    }
-
-    override fun write(value: TxStatus, buf: ByteBuffer) {
-        when(value) {
-            is TxStatus.NotInMempool -> {
-                buf.putInt(1)
-                Unit
-            }
-            is TxStatus.InMempool -> {
-                buf.putInt(2)
-                Unit
-            }
-            is TxStatus.Confirmed -> {
-                buf.putInt(3)
-                FfiConverterUInt.write(value.`numberOfBlocks`, buf)
-                FfiConverterTimestamp.write(value.`confirmedAt`, buf)
-                Unit
-            }
-        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
-    }
-}
-
-
-
-
-
-
-enum class WalletRuntimeErrorCode {
-    ELECTRUM_SERVICE_UNAVAILABLE,NOT_ENOUGH_FUNDS,REMOTE_SERVICE_UNAVAILABLE,SEND_TO_OURSELVES,GENERIC_ERROR;
-}
-
-public object FfiConverterTypeWalletRuntimeErrorCode: FfiConverterRustBuffer<WalletRuntimeErrorCode> {
-    override fun read(buf: ByteBuffer) = try {
-        WalletRuntimeErrorCode.values()[buf.getInt() - 1]
-    } catch (e: IndexOutOfBoundsException) {
-        throw RuntimeException("invalid enum value, something is very wrong!!", e)
-    }
-
-    override fun allocationSize(value: WalletRuntimeErrorCode) = 4
-
-    override fun write(value: WalletRuntimeErrorCode, buf: ByteBuffer) {
-        buf.putInt(value.ordinal + 1)
-    }
-}
-
-
 
 
 
@@ -1541,6 +1527,173 @@ public object FfiConverterTypeAuthError : FfiConverterRustBuffer<AuthException> 
 
 
 
+enum class AuthLevel {
+    PSEUDONYMOUS,OWNER,EMPLOYEE;
+}
+
+public object FfiConverterTypeAuthLevel: FfiConverterRustBuffer<AuthLevel> {
+    override fun read(buf: ByteBuffer) = try {
+        AuthLevel.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: AuthLevel) = 4
+
+    override fun write(value: AuthLevel, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class AuthRuntimeErrorCode {
+    AUTH_SERVICE_ERROR,ACCESS_EXPIRED,NETWORK_ERROR,REMOTE_SERVICE_UNAVAILABLE,GENERIC_ERROR,CORRUPT_DATA,OBJECT_NOT_FOUND;
+}
+
+public object FfiConverterTypeAuthRuntimeErrorCode: FfiConverterRustBuffer<AuthRuntimeErrorCode> {
+    override fun read(buf: ByteBuffer) = try {
+        AuthRuntimeErrorCode.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: AuthRuntimeErrorCode) = 4
+
+    override fun write(value: AuthRuntimeErrorCode, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class LogLevel {
+    ERROR,WARN,INFO,DEBUG,TRACE;
+}
+
+public object FfiConverterTypeLogLevel: FfiConverterRustBuffer<LogLevel> {
+    override fun read(buf: ByteBuffer) = try {
+        LogLevel.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: LogLevel) = 4
+
+    override fun write(value: LogLevel, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class Network {
+    BITCOIN,TESTNET,SIGNET,REGTEST;
+}
+
+public object FfiConverterTypeNetwork: FfiConverterRustBuffer<Network> {
+    override fun read(buf: ByteBuffer) = try {
+        Network.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: Network) = 4
+
+    override fun write(value: Network, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+sealed class TxStatus {
+    object NotInMempool : TxStatus()
+    
+    object InMempool : TxStatus()
+    
+    data class Confirmed(
+        val `numberOfBlocks`: UInt, 
+        val `confirmedAt`: java.time.Instant
+        ) : TxStatus()
+    
+
+    
+}
+
+public object FfiConverterTypeTxStatus : FfiConverterRustBuffer<TxStatus>{
+    override fun read(buf: ByteBuffer): TxStatus {
+        return when(buf.getInt()) {
+            1 -> TxStatus.NotInMempool
+            2 -> TxStatus.InMempool
+            3 -> TxStatus.Confirmed(
+                FfiConverterUInt.read(buf),
+                FfiConverterTimestamp.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: TxStatus) = when(value) {
+        is TxStatus.NotInMempool -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4
+            )
+        }
+        is TxStatus.InMempool -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4
+            )
+        }
+        is TxStatus.Confirmed -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4
+                + FfiConverterUInt.allocationSize(value.`numberOfBlocks`)
+                + FfiConverterTimestamp.allocationSize(value.`confirmedAt`)
+            )
+        }
+    }
+
+    override fun write(value: TxStatus, buf: ByteBuffer) {
+        when(value) {
+            is TxStatus.NotInMempool -> {
+                buf.putInt(1)
+                Unit
+            }
+            is TxStatus.InMempool -> {
+                buf.putInt(2)
+                Unit
+            }
+            is TxStatus.Confirmed -> {
+                buf.putInt(3)
+                FfiConverterUInt.write(value.`numberOfBlocks`, buf)
+                FfiConverterTimestamp.write(value.`confirmedAt`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
 
 sealed class WalletException: Exception() {
     // Each variant is a nested class
@@ -1641,6 +1794,29 @@ public object FfiConverterTypeWalletError : FfiConverterRustBuffer<WalletExcepti
 
 
 
+enum class WalletRuntimeErrorCode {
+    ELECTRUM_SERVICE_UNAVAILABLE,NOT_ENOUGH_FUNDS,REMOTE_SERVICE_UNAVAILABLE,SEND_TO_OURSELVES,GENERIC_ERROR;
+}
+
+public object FfiConverterTypeWalletRuntimeErrorCode: FfiConverterRustBuffer<WalletRuntimeErrorCode> {
+    override fun read(buf: ByteBuffer) = try {
+        WalletRuntimeErrorCode.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: WalletRuntimeErrorCode) = 4
+
+    override fun write(value: WalletRuntimeErrorCode, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
 public object FfiConverterOptionalString: FfiConverterRustBuffer<String?> {
     override fun read(buf: ByteBuffer): String? {
         if (buf.get().toInt() == 0) {
@@ -1663,31 +1839,6 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<String?> {
         } else {
             buf.put(1)
             FfiConverterString.write(value, buf)
-        }
-    }
-}
-
-
-
-
-public object FfiConverterSequenceUByte: FfiConverterRustBuffer<List<UByte>> {
-    override fun read(buf: ByteBuffer): List<UByte> {
-        val len = buf.getInt()
-        return List<UByte>(len) {
-            FfiConverterUByte.read(buf)
-        }
-    }
-
-    override fun allocationSize(value: List<UByte>): Int {
-        val sizeForLength = 4
-        val sizeForItems = value.map { FfiConverterUByte.allocationSize(it) }.sum()
-        return sizeForLength + sizeForItems
-    }
-
-    override fun write(value: List<UByte>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        value.forEach {
-            FfiConverterUByte.write(it, buf)
         }
     }
 }
@@ -1745,56 +1896,51 @@ public object FfiConverterSequenceTypeTxDetails: FfiConverterRustBuffer<List<TxD
 fun `initNativeLoggerOnce`(`minLevel`: LogLevel) =
     
     rustCall() { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_init_native_logger_once(FfiConverterTypeLogLevel.lower(`minLevel`), _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_func_init_native_logger_once(FfiConverterTypeLogLevel.lower(`minLevel`),_status)
 }
+
 
 @Throws(WalletException::class)
 
 fun `generateMnemonic`(): List<String> {
     return FfiConverterSequenceString.lift(
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_generate_mnemonic( _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_func_generate_mnemonic(_status)
 })
 }
-
 
 @Throws(WalletException::class)
 
 fun `deriveKeys`(`network`: Network, `mnemonicString`: List<String>): WalletKeys {
     return FfiConverterTypeWalletKeys.lift(
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_derive_keys(FfiConverterTypeNetwork.lower(`network`), FfiConverterSequenceString.lower(`mnemonicString`), _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_func_derive_keys(FfiConverterTypeNetwork.lower(`network`),FfiConverterSequenceString.lower(`mnemonicString`),_status)
 })
 }
-
 
 @Throws(WalletException::class)
 
 fun `sign`(`message`: String, `privateKey`: String): String {
     return FfiConverterString.lift(
     rustCallWithError(WalletException) { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_sign(FfiConverterString.lower(`message`), FfiConverterString.lower(`privateKey`), _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_func_sign(FfiConverterString.lower(`message`),FfiConverterString.lower(`privateKey`),_status)
 })
 }
-
 
 
 fun `generateKeypair`(): KeyPair {
     return FfiConverterTypeKeyPair.lift(
     rustCall() { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_generate_keypair( _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_func_generate_keypair(_status)
 })
 }
-
 
 
 fun `wordsByPrefix`(`prefix`: String): List<String> {
     return FfiConverterSequenceString.lift(
     rustCall() { _status ->
-    _UniFFILib.INSTANCE.lipabusinesslib_ee8f_words_by_prefix(FfiConverterString.lower(`prefix`), _status)
+    _UniFFILib.INSTANCE.uniffi_lipabusinesslib_fn_func_words_by_prefix(FfiConverterString.lower(`prefix`),_status)
 })
 }
-
-
 
 
