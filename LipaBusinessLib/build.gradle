@@ -24,7 +24,7 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -47,7 +47,7 @@ android {
 }
 
 dependencies {
-    implementation "net.java.dev.jna:jna:5.8.0@aar"
+    implementation 'net.java.dev.jna:jna:5.13.0@aar'
 }
 
 afterEvaluate {
